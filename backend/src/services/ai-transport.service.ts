@@ -20,6 +20,16 @@ export interface AiResultStreamEntry {
   result: AiResultEnvelope;
 }
 
+export interface ReadAiResultsOptions {
+  blockMs?: number;
+  count?: number;
+}
+
+type AiResultReadReply = Array<{
+  name: string;
+  messages: Array<{ id: string; message: Record<string, RedisArgument> }>;
+}> | null;
+
 /** Builds and publishes one contract-validated AI job to Redis Streams. */
 export async function publishAiJob(
   input: PublishAiJobInput,
@@ -57,4 +67,21 @@ export function parseAiResultEntry(
   }
 
   return { streamId, result: aiResultEnvelopeSchema.parse(decoded) };
+}
+
+/** Reads and validates result entries after the supplied Redis stream cursor. */
+export async function readAiResultsAfter(
+  lastId: string,
+  options: ReadAiResultsOptions = {},
+  client?: Pick<RelayRedisClient, "xRead">
+): Promise<AiResultStreamEntry[]> {
+  const reader = client ?? (await connectRedis());
+  const streams = (await reader.xRead(
+    [{ key: env.AI_RESULT_STREAM, id: lastId }],
+    { BLOCK: options.blockMs ?? 5_000, COUNT: options.count ?? 10 }
+  )) as AiResultReadReply;
+
+  return (streams ?? []).flatMap((stream) =>
+    stream.messages.map((message) => parseAiResultEntry(message.id, message.message))
+  );
 }

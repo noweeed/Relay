@@ -1,8 +1,8 @@
 # Relay AI service
 
-This directory is the Python 3.12+ boundary for Relay's future LangGraph workflows, model calls, embeddings, transcription, and structured AI outputs.
+This directory is the Python 3.12+ boundary for Relay's LangGraph workflows, model calls, embeddings, transcription, and structured AI outputs.
 
-In v0.1 it provides the package, configuration model, shared envelope models, and a startup check. The Redis Streams worker loop and meeting graph arrive with the extraction/async milestones described in the PRD.
+The Redis Streams transport validates the same versioned job/result envelopes as Node. The meeting extraction graph is the next v0.5 implementation step.
 
 From `D:\Relay\backend\ai-service`:
 
@@ -11,7 +11,12 @@ python -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
 python -m relay_ai.worker --check
+python -m relay_ai.worker --check-transport
 pytest
 ```
+
+`--check-transport` reads `REDIS_URL` from `.env`, connects, sends a Redis `PING`, and exits. It does not consume any jobs.
+
+Redis messages use one `envelope` field containing JSON. `redis_transport.py` validates every job before Python handles it and validates every result before publishing it back to Node.
 
 The Python service must not become a second application backend. Node authorizes jobs and persists validated results.

@@ -84,6 +84,8 @@ When MongoDB is connected, `/health` returns HTTP 200 and `database.status: conn
 
 See [`ai-service/README.md`](ai-service/README.md). The AI service is a worker behind Node, not a separate frontend-facing API.
 
+For v0.5, set `REDIS_URL` in `backend/.env` and the Python worker's `.env` to the same Redis instance. Node publishes to `AI_JOB_STREAM`; Python returns contract-validated results through `AI_RESULT_STREAM`. Stream names normally keep their provided defaults.
+
 ## How the authentication code is organized
 
 Follow one request in this order when learning the code:

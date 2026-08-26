@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { parseAiResultEntry, publishAiJob } from "../../src/services/ai-transport.service";
+import {
+  parseAiResultEntry,
+  publishAiJob,
+  readAiResultsAfter
+} from "../../src/services/ai-transport.service";
 
 describe("AI Redis Streams transport", () => {
   it("publishes a validated JSON job envelope", async () => {
@@ -50,6 +54,32 @@ describe("AI Redis Streams transport", () => {
   it("rejects malformed Redis result messages", () => {
     expect(() => parseAiResultEntry("bad-1", { envelope: "not-json" })).toThrow(
       "contains invalid JSON"
+    );
+  });
+
+  it("reads validated results after a stream cursor", async () => {
+    const envelope = JSON.stringify({
+      jobId: "job-2",
+      jobType: "meeting.process",
+      schemaVersion: 1,
+      projectId: "project-1",
+      status: "succeeded",
+      completedAt: new Date().toISOString(),
+      payload: { meetingId: "meeting-2", tasks: [] }
+    });
+    const xRead = vi.fn().mockResolvedValue([
+      {
+        name: "relay:ai:results",
+        messages: [{ id: "1710000000002-0", message: { envelope } }]
+      }
+    ]);
+
+    const results = await readAiResultsAfter("1710000000001-0", { blockMs: 1 }, { xRead } as never);
+
+    expect(results[0]?.result.jobId).toBe("job-2");
+    expect(xRead).toHaveBeenCalledWith(
+      [{ key: "relay:ai:results", id: "1710000000001-0" }],
+      { BLOCK: 1, COUNT: 10 }
     );
   });
 });

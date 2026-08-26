@@ -2,7 +2,7 @@
 
 **Last updated:** August 26, 2026  
 **Current milestone:** v0.5 — Python Extraction and Human Review  
-**Overall status:** v0.4 complete and verified; v0.5 contracts and candidate persistence started
+**Overall status:** v0.4 complete and verified; v0.5 Redis transport complete and meeting graph next
 
 This is the living implementation tracker. Update it when work begins, acceptance criteria change, or a milestone is completed.
 
@@ -48,8 +48,8 @@ This is the living implementation tracker. Update it when work begins, acceptanc
 | `npm run typecheck`         | Passed    |
 | `npm run lint`              | Passed    |
 | `npm run build`             | Passed    |
-| Node unit/integration tests | 27 passed |
-| Python schema tests         | 2 passed  |
+| Node unit/integration tests | 33 passed |
+| Python unit/schema tests    | 10 passed |
 | Ruff                        | Passed    |
 | mypy                        | Passed    |
 | Python worker `--check`     | Passed    |
@@ -57,7 +57,7 @@ This is the living implementation tracker. Update it when work begins, acceptanc
 
 ## Immediate next actions
 
-1. [>] Set up Redis Streams AI job/result transport.
+1. [x] Set up Redis Streams AI job/result transport.
 2. [>] Build the LangGraph meeting extraction graph.
 3. [>] Implement TaskCandidate review endpoints.
 4. [ ] Connect the frontend review queue to candidate endpoints.
@@ -140,7 +140,7 @@ This is the living implementation tracker. Update it when work begins, acceptanc
 
 ### v0.5 — Python Extraction and Human Review
 
-- [ ] Redis Streams AI job/result transport
+- [x] Redis Streams AI job/result transport
 - [x] Matching Zod contracts in Node
 - [x] Python Pydantic meeting schemas
 - [ ] LangGraph meeting graph

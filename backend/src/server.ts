@@ -1,6 +1,7 @@
 import { createServer } from "node:http";
 import { createApp } from "./app";
 import { connectDatabase, disconnectDatabase } from "./config/database";
+import { disconnectRedis } from "./config/redis";
 import { env } from "./config/env";
 import { logger } from "./config/logger";
 import { initializeSocketServer } from "./sockets/io";
@@ -20,11 +21,11 @@ async function startServer(): Promise<void> {
   const shutdown = (signal: NodeJS.Signals): void => {
     logger.info({ signal }, "Graceful shutdown started");
     server.close(() => {
-      void disconnectDatabase()
+      void Promise.all([disconnectDatabase(), disconnectRedis()])
         .then(() => process.exit(0))
         .catch((error: unknown) => {
           // Pino recognizes `err` and serializes its message, stack, and error code.
-          logger.error({ err: error }, "Database disconnect failed");
+          logger.error({ err: error }, "Infrastructure disconnect failed");
           process.exit(1);
         });
     });

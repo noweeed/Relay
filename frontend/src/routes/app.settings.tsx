@@ -47,19 +47,26 @@ export const Route = createFileRoute("/app/settings")({
 function Section({
   title,
   description,
+  action,
   children,
 }: {
   title: string;
   description?: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
-    <section className="border-b border-border pb-8 last:border-0">
-      <h2 className="section-title">{title}</h2>
-      {description ? (
-        <p className="mt-1 text-[13.5px] text-muted-foreground">{description}</p>
-      ) : null}
-      <div className="mt-4">{children}</div>
+    <section className="space-y-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="section-title">{title}</h2>
+          {description ? (
+            <p className="mt-1 text-[13px] text-muted-foreground">{description}</p>
+          ) : null}
+        </div>
+        {action}
+      </div>
+      {children}
     </section>
   );
 }
@@ -355,55 +362,60 @@ function SettingsPage() {
         description="Details, members and integrations for this project."
       />
 
-      <div className="max-w-2xl space-y-8 px-6 py-6 md:px-8">
-        <Section title="Details">
-          <div className="space-y-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="s-project">Project name</Label>
-              <Input
-                id="s-project"
-                value={projectName}
-                maxLength={80}
-                onChange={(e) => setProjectName(e.target.value)}
-                aria-invalid={!!error}
-              />
-              {error ? <p className="text-[12.5px] text-destructive">{error}</p> : null}
+      <div className="mx-auto max-w-3xl space-y-8 px-6 py-6 md:px-8">
+        <Section
+          title="Project details"
+          description="The name and description shown to everyone in this project."
+        >
+          <div className="rounded-xl border border-border bg-card p-4">
+            <div className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="s-project">Project name</Label>
+                <Input
+                  id="s-project"
+                  value={projectName}
+                  maxLength={80}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  aria-invalid={!!error}
+                />
+                {error ? <p className="text-[12.5px] text-destructive">{error}</p> : null}
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="s-desc">Description</Label>
+                <Textarea
+                  id="s-desc"
+                  rows={3}
+                  maxLength={500}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="What this team is working on."
+                />
+              </div>
             </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="s-desc">Description</Label>
-              <Textarea
-                id="s-desc"
-                rows={3}
-                maxLength={500}
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="What this team is working on."
-              />
-            </div>
+            <Button size="sm" className="mt-4" onClick={save} disabled={saving}>
+              {saving ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Saving...
+                </>
+              ) : (
+                "Save changes"
+              )}
+            </Button>
           </div>
-          <Button size="sm" className="mt-4" onClick={save} disabled={saving}>
-            {saving ? (
-              <>
-                <Loader2 className="size-4 animate-spin" /> Saving...
-              </>
-            ) : (
-              "Save changes"
-            )}
-          </Button>
         </Section>
 
         <Section
           title="Members"
           description="Everyone here can review extracted tasks and edit the board."
-        >
-          {canManageMembers ? (
-            <div className="flex justify-end">
+          action={
+            canManageMembers ? (
               <Button size="sm" variant="outline" onClick={() => setInviteOpen(true)}>
                 <Plus className="size-4" /> Add member
               </Button>
-            </div>
-          ) : null}
-          <ul className="mt-3 divide-y divide-border rounded-xl border border-border bg-card">
+            ) : undefined
+          }
+        >
+          <ul className="divide-y divide-border rounded-xl border border-border bg-card">
             {members.map((m) => (
               <li key={m.id} className="flex items-center gap-3 px-4 py-3">
                 <UserAvatar memberId={m.id} size={28} />
@@ -430,47 +442,51 @@ function SettingsPage() {
           </ul>
         </Section>
 
-        <Section
-          title="Telegram"
-          description="Send this project's deadline reminders where the team already talks."
-        >
-          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-3">
+        <Section title="Integrations" description="Connect services used by this project's team.">
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-4">
             <Send className="size-4 text-muted-foreground" />
-            <span className="text-[13.5px] font-medium">Telegram</span>
+            <span className="min-w-0 flex-1">
+              <span className="block text-[13.5px] font-medium">Telegram</span>
+              <span className="meta-text">Send project deadline reminders to your team.</span>
+            </span>
             {telegram ? (
               <Tag tone="success">Connected</Tag>
             ) : (
               <Tag tone="neutral">Not connected</Tag>
             )}
-            <div className="ml-auto">
-              {telegram ? (
-                <Button size="sm" variant="outline" onClick={() => setTelegram(false)}>
-                  Disconnect
-                </Button>
-              ) : (
-                <Button size="sm" onClick={() => setTelegram(true)}>
-                  Connect Telegram
-                </Button>
-              )}
-            </div>
+            {telegram ? (
+              <Button size="sm" variant="outline" onClick={() => setTelegram(false)}>
+                Disconnect
+              </Button>
+            ) : (
+              <Button size="sm" onClick={() => setTelegram(true)}>
+                Connect Telegram
+              </Button>
+            )}
           </div>
         </Section>
 
-        <Section title="Danger zone">
-          {activeProject?.role === "owner" ? (
-            <div className="mb-3 flex flex-wrap items-center gap-4 rounded-xl border border-warning/40 bg-warning/5 px-4 py-4">
+        {activeProject?.role === "owner" ? (
+          <Section
+            title="Ownership"
+            description="Control who has final authority over this project."
+          >
+            <div className="flex flex-wrap items-center gap-4 rounded-xl border border-border bg-card p-4">
               <div className="min-w-0 flex-1">
                 <p className="text-[13.5px] font-medium">Transfer ownership</p>
                 <p className="mt-1 text-[13px] text-muted-foreground">
-                  Give ownership to an existing project member. You will become an admin.
+                  Give ownership to an existing member. You will remain as an admin.
                 </p>
               </div>
               <Button variant="outline" size="sm" onClick={() => setTransferOpen(true)}>
-                <ArrowRightLeft className="size-4" /> Transfer
+                <ArrowRightLeft className="size-4" /> Transfer ownership
               </Button>
             </div>
-          ) : null}
-          <div className="flex flex-wrap items-center gap-4 rounded-xl border border-destructive/40 bg-destructive/5 px-4 py-4">
+          </Section>
+        ) : null}
+
+        <Section title="Danger zone">
+          <div className="flex flex-wrap items-center gap-4 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
             <div className="min-w-0 flex-1">
               <p className="text-[13.5px] font-medium">Delete project</p>
               <p className="mt-1 text-[13px] text-muted-foreground">
