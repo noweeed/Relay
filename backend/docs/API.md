@@ -16,6 +16,11 @@ Authentication endpoints:
 - `POST /api/auth/refresh`
 - `POST /api/auth/logout`
 - `GET /api/auth/me`
+- `PATCH /api/auth/me`
+- `PATCH /api/auth/me/password`
+- `PUT /api/auth/me/notifications`
+- `DELETE /api/auth/me`
+- `POST /api/auth/google`
 
 Access tokens are returned in JSON and sent as `Authorization: Bearer <token>`. Refresh JWTs are rotated through a secure HTTP-only cookie and backed by a hashed, revocable MongoDB session.
 
@@ -28,9 +33,14 @@ Project endpoints:
 - `DELETE /api/projects/:projectId`
 - `GET /api/projects/:projectId/members`
 - `POST /api/projects/:projectId/members/invite`
+- `PATCH /api/projects/:projectId/members/:userId`
 - `DELETE /api/projects/:projectId/members/:userId`
+- `POST /api/projects/:projectId/transfer-ownership`
 
-The initial invite endpoint adds an existing Relay user by email. It does not send an email invitation yet.
+The invite endpoint adds an existing Relay user by email; outbound email invitations are not sent yet.
+Its `teamRole` field is a free-text descriptive title such as `Frontend engineer`. It is separate from
+the authorization `role` (`owner`, `admin`, or `member`). Owners/admins can edit `teamRole` later
+without changing the member's access permissions.
 
 Task and Kanban endpoints:
 

@@ -2,7 +2,7 @@
 
 **Last updated:** August 26, 2026  
 **Current milestone:** v0.5 — Python Extraction and Human Review  
-**Overall status:** v0.4 complete and verified; 27 tests passing across 10 test files
+**Overall status:** v0.4 complete and verified; v0.5 contracts and candidate persistence started
 
 This is the living implementation tracker. Update it when work begins, acceptance criteria change, or a milestone is completed.
 
@@ -43,25 +43,24 @@ This is the living implementation tracker. Update it when work begins, acceptanc
 
 ### Verification results
 
-| Check | Result |
-|---|---|
-| `npm run typecheck` | Passed |
-| `npm run lint` | Passed |
-| `npm run build` | Passed |
+| Check                       | Result    |
+| --------------------------- | --------- |
+| `npm run typecheck`         | Passed    |
+| `npm run lint`              | Passed    |
+| `npm run build`             | Passed    |
 | Node unit/integration tests | 27 passed |
-| Python schema tests | 2 passed |
-| Ruff | Passed |
-| mypy | Passed |
-| Python worker `--check` | Passed |
-| Live Atlas connection | Passed |
+| Python schema tests         | 2 passed  |
+| Ruff                        | Passed    |
+| mypy                        | Passed    |
+| Python worker `--check`     | Passed    |
+| Live Atlas connection       | Passed    |
 
 ## Immediate next actions
 
 1. [>] Set up Redis Streams AI job/result transport.
-2. [>] Implement matching Zod contracts in Node.
-3. [>] Implement Python Pydantic meeting schemas.
-4. [>] Build LangGraph meeting extraction graph.
-5. [ ] Implement TaskCandidate model and review endpoints.
+2. [>] Build the LangGraph meeting extraction graph.
+3. [>] Implement TaskCandidate review endpoints.
+4. [ ] Connect the frontend review queue to candidate endpoints.
 
 ## Milestone roadmap
 
@@ -107,7 +106,22 @@ This is the living implementation tracker. Update it when work begins, acceptanc
 - [x] Task realtime events (Socket.IO)
 - [x] Authorization and integration tests
 
-**Acceptance demo:** The Lovable frontend can run a complete manual Kanban board against Relay APIs.
+**Acceptance demo:** The Relay web frontend can run a complete manual Kanban board against Relay APIs.
+
+### Frontend integration
+
+- [x] Remove Lovable-specific runtime, telemetry, metadata, and branding assets
+- [x] Replace the Lovable Vite wrapper with standard TanStack Start/Vite configuration
+- [x] Real signup, login, refresh-cookie session restoration, and logout
+- [x] Real project listing and project creation
+- [x] Real task board and custom-column integration
+- [x] Owner/admin board column creation with model-backed name, color, and category fields
+- [x] Real member addition by email with editable, permission-safe team roles
+- [x] Account profile, avatar, password, notification preferences, and guarded deletion APIs/UI
+- [x] Existing-member project ownership transfer
+- [x] Google Identity sign-in/sign-up flow
+- [x] Real transcript meeting creation, listing, parsed detail, and linked-task integration
+- [ ] Real candidate review integration
 
 ### v0.4 — Transcript Meetings
 
@@ -128,7 +142,7 @@ This is the living implementation tracker. Update it when work begins, acceptanc
 
 - [ ] Redis Streams AI job/result transport
 - [x] Matching Zod contracts in Node
-- [ ] Python Pydantic meeting schemas
+- [x] Python Pydantic meeting schemas
 - [ ] LangGraph meeting graph
 - [ ] Transcript normalization node
 - [ ] LLM provider abstraction

@@ -49,6 +49,7 @@ From `D:\Relay\backend`:
 ```powershell
 Copy-Item .env.example .env
 # Add MONGODB_URI to .env
+# Add GOOGLE_CLIENT_ID to enable Google sign-in
 npm install
 npm run dev
 ```

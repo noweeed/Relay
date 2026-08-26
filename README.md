@@ -7,18 +7,20 @@ Relay turns meetings into reviewable, traceable project work.
 ```text
 Relay/
 ├── backend/             Node API, Python AI worker, tests, and contracts
-├── frontend/            Lovable frontend handoff area
+├── frontend/            Relay TanStack web application
 ├── Relay_PRD.md         Product and architecture requirements
+├── LEARNING_ORDER.md    Beginner-friendly file-by-file study path
 ├── FLOW.md              Runtime and feature flows
 ├── PROGRESS.md          Current status and future roadmap
 └── graphify-out/        Generated knowledge-graph artifacts
 ```
 
-Start backend work in [`backend/README.md`](backend/README.md). The frontend is maintained separately with Lovable; its boundary and expected integration are documented in [`frontend/README.md`](frontend/README.md).
+Start backend work in [`backend/README.md`](backend/README.md). Frontend setup and integration notes are documented in [`frontend/README.md`](frontend/README.md).
 
 ## Project documents
 
 - [`Relay_PRD.md`](Relay_PRD.md) — product and architecture requirements
+- [`LEARNING_ORDER.md`](LEARNING_ORDER.md) — recommended order for learning every implemented file
 - [`FLOW.md`](FLOW.md) — runtime and feature flows
 - [`PROGRESS.md`](PROGRESS.md) — current implementation and future milestones
 - [`graphify-out/graph.html`](graphify-out/graph.html) — interactive codebase graph

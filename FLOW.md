@@ -5,7 +5,7 @@ This document describes how requests, data, and responsibility move through Rela
 ## 1. Runtime architecture
 
 ```text
-Lovable frontend
+Relay web frontend
        |
        | HTTPS REST / JSON
        | Socket.IO events

@@ -1,19 +1,31 @@
 node_modules/
 dist/
 coverage/
+
+# Environment
 .env
 .env.*
 !.env.example
+
+# Logs
 *.log
 
-# Local Codex configuration and generated workspace data.
+# Local Codex / Lovable
 .codex/
 **/.codex/
+.lovable/
+**/.lovable/
 
+# Python
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .venv/
 
+# Graphify generated output
+graphify-out/
+**/graphify-out/
+
+# OS
 .DS_Store
 Thumbs.db

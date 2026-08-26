@@ -9,7 +9,7 @@ let io: SocketServer | undefined;
 export function initializeSocketServer(httpServer: HttpServer): SocketServer {
   io = new SocketServer(httpServer, {
     cors: { origin: env.FRONTEND_URL, credentials: true },
-    // Disable serving the client bundle — the Lovable frontend will use its own.
+    // Disable serving the Socket.IO client bundle because the web app installs its own client.
     serveClient: false
   });
 
