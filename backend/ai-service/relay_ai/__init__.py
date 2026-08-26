@@ -1,0 +1,3 @@
+"""Relay's Python AI worker package."""
+
+__version__ = "0.1.0"

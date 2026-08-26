@@ -1,0 +1,19 @@
+node_modules/
+dist/
+coverage/
+.env
+.env.*
+!.env.example
+*.log
+
+# Local Codex configuration and generated workspace data.
+.codex/
+**/.codex/
+
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+.DS_Store
+Thumbs.db
