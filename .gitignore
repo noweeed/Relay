@@ -1,6 +1,7 @@
 node_modules/
 dist/
 coverage/
+.relay-data/
 
 # Environment
 .env

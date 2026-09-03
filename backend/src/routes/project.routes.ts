@@ -4,7 +4,9 @@ import * as meetingController from "../controllers/meeting.controller";
 import * as overviewController from "../controllers/overview.controller";
 import * as projectController from "../controllers/project.controller";
 import * as taskController from "../controllers/task.controller";
+import * as taskCandidateController from "../controllers/task-candidate.controller";
 import { authenticate } from "../middleware/auth.middleware";
+import { parseAudioUpload } from "../middleware/audio-upload.middleware";
 import {
   requireProjectMembership,
   requireProjectRole,
@@ -20,6 +22,7 @@ import {
   updateKanbanColumnSchema,
 } from "../validators/kanban.validator";
 import {
+  createAudioMeetingSchema,
   createMeetingSchema,
   listMeetingsQuerySchema,
   meetingParamsSchema,
@@ -34,6 +37,13 @@ import {
   updateProjectMemberSchema,
   updateProjectSchema,
 } from "../validators/project.validator";
+import {
+  bulkCandidateActionSchema,
+  candidateCollectionParamsSchema,
+  candidateParamsSchema,
+  listCandidatesQuerySchema,
+  updateCandidateSchema,
+} from "../validators/task-candidate.validator";
 import {
   createTaskSchema,
   listTasksQuerySchema,
@@ -148,6 +158,20 @@ projectRouter.get(
 );
 
 projectRouter.post(
+  "/:projectId/meetings/audio",
+  validateRequest({ params: projectParamsSchema }),
+  requireProjectMembership,
+  parseAudioUpload,
+  validateRequest({ body: createAudioMeetingSchema }),
+  asyncHandler(meetingController.createAudioMeeting),
+);
+projectRouter.post(
+  "/:projectId/meetings/transcript",
+  validateRequest({ params: projectParamsSchema, body: createMeetingSchema }),
+  requireProjectMembership,
+  asyncHandler(meetingController.createMeeting),
+);
+projectRouter.post(
   "/:projectId/meetings",
   validateRequest({ params: projectParamsSchema, body: createMeetingSchema }),
   requireProjectMembership,
@@ -167,6 +191,12 @@ projectRouter.get(
   validateRequest({ params: meetingParamsSchema }),
   requireProjectMembership,
   asyncHandler(meetingController.getMeeting),
+);
+projectRouter.get(
+  "/:projectId/meetings/:meetingId/audio",
+  validateRequest({ params: meetingParamsSchema }),
+  requireProjectMembership,
+  asyncHandler(meetingController.getMeetingAudio),
 );
 projectRouter.get(
   "/:projectId/meetings/:meetingId/transcript",
@@ -196,6 +226,42 @@ projectRouter.post(
   requireProjectMembership,
   requireProjectRole("owner", "admin"),
   asyncHandler(meetingController.requestReprocess),
+);
+projectRouter.get(
+  "/:projectId/meetings/:meetingId/candidates",
+  validateRequest({ params: candidateCollectionParamsSchema, query: listCandidatesQuerySchema }),
+  requireProjectMembership,
+  asyncHandler(taskCandidateController.listCandidates),
+);
+projectRouter.patch(
+  "/:projectId/meetings/:meetingId/candidates/:candidateId",
+  validateRequest({ params: candidateParamsSchema, body: updateCandidateSchema }),
+  requireProjectMembership,
+  asyncHandler(taskCandidateController.updateCandidate),
+);
+projectRouter.post(
+  "/:projectId/meetings/:meetingId/candidates/:candidateId/approve",
+  validateRequest({ params: candidateParamsSchema }),
+  requireProjectMembership,
+  asyncHandler(taskCandidateController.approveCandidate),
+);
+projectRouter.post(
+  "/:projectId/meetings/:meetingId/candidates/:candidateId/reject",
+  validateRequest({ params: candidateParamsSchema }),
+  requireProjectMembership,
+  asyncHandler(taskCandidateController.rejectCandidate),
+);
+projectRouter.post(
+  "/:projectId/meetings/:meetingId/candidates/bulk-approve",
+  validateRequest({ params: candidateCollectionParamsSchema, body: bulkCandidateActionSchema }),
+  requireProjectMembership,
+  asyncHandler(taskCandidateController.bulkApproveCandidates),
+);
+projectRouter.post(
+  "/:projectId/meetings/:meetingId/candidates/bulk-reject",
+  validateRequest({ params: candidateCollectionParamsSchema, body: bulkCandidateActionSchema }),
+  requireProjectMembership,
+  asyncHandler(taskCandidateController.bulkRejectCandidates),
 );
 
 projectRouter.get(

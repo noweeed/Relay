@@ -1,0 +1,25 @@
+{
+  "jobId": "fixture-job-1",
+  "jobType": "meeting.process",
+  "schemaVersion": 1,
+  "projectId": "fixture-project-1",
+  "resourceId": "fixture-meeting-1",
+  "correlationId": "fixture-correlation-1",
+  "status": "succeeded",
+  "completedAt": "2026-09-03T08:00:03Z",
+  "payload": {
+    "meetingId": "fixture-meeting-1",
+    "tasks": [
+      {
+        "title": "Finish the candidate review API",
+        "description": "Implement edit, approve, reject, and bulk review actions.",
+        "assigneeName": "Naveed",
+        "dueDate": "2026-09-04",
+        "priority": "high",
+        "segmentOrder": 0,
+        "sourceQuote": "I will finish the candidate review API by Friday.",
+        "confidence": 0.98
+      }
+    ]
+  }
+}

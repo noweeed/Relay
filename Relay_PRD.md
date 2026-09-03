@@ -961,6 +961,8 @@ If the transcript is too large for one context window:
 
 The Python worker performs steps 1–4 and returns the reconciled result. Node performs step 5.
 
+The v0.5 implementation uses a configurable normalized-character budget, retains a small whole-segment overlap for boundary context, and bounds concurrent chunk calls. Reconciliation is deterministic: exact repeated evidence or an identical normalized action identity collapses to one candidate, preferring the highest-confidence and most complete result while retaining verbatim source traceability.
+
 ## 10.4 Duplicate detection agent
 
 The duplicate workflow creates candidate embeddings, performs project-scoped read-only Atlas Vector Search against open tasks, and optionally uses an LLM to classify likely matches as `same_work`, `related_but_separate`, or `unrelated`. It returns proposed matches and field differences to Node. It never merges or updates a task.
@@ -1587,8 +1589,8 @@ AI_JOB_SCHEMA_VERSION=1
 AI_RESULT_SCHEMA_VERSION=1
 AI_WORKER_CONSUMER_GROUP=relay-ai-workers
 
-LLM_PROVIDER=
-LLM_API_KEY=
+GROQ_API_KEY=
+GROQ_MODEL=qwen/qwen3.8-27b
 
 EMBEDDING_PROVIDER=
 EMBEDDING_API_KEY=

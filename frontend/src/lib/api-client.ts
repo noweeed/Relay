@@ -55,6 +55,11 @@ export function setAccessToken(token: string | null): void {
   accessToken = token;
 }
 
+/** Exposes the in-memory token only to trusted same-page transports such as Socket.IO. */
+export function getAccessToken(): string | null {
+  return accessToken;
+}
+
 /** Reads Relay's standard success/error envelope and preserves safe backend messages. */
 async function readResponse<T>(response: Response): Promise<T> {
   const body = (await response.json().catch(() => null)) as ApiSuccessBody<T> | ApiErrorBody | null;

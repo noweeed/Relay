@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import {
+  acknowledgeAiResult,
+  claimStaleAiResults,
+  ensureAiResultConsumerGroup,
   parseAiResultEntry,
   publishAiJob,
   readAiResultsAfter
@@ -80,6 +83,29 @@ describe("AI Redis Streams transport", () => {
     expect(xRead).toHaveBeenCalledWith(
       [{ key: "relay:ai:results", id: "1710000000001-0" }],
       { BLOCK: 1, COUNT: 10 }
+    );
+  });
+
+  it("creates a result group, reclaims a stale delivery, and acknowledges it", async () => {
+    const xGroupCreate = vi.fn().mockResolvedValue("OK");
+    const xAutoClaim = vi.fn().mockResolvedValue({
+      nextId: "0-0",
+      messages: [{ id: "1710000000003-0", message: { envelope: "{}" } }]
+    });
+    const xAck = vi.fn().mockResolvedValue(1);
+
+    await ensureAiResultConsumerGroup({ xGroupCreate } as never);
+    const claimed = await claimStaleAiResults("api-1", "0-0", { xAutoClaim } as never);
+    await acknowledgeAiResult(claimed.deliveries[0]!.streamId, { xAck } as never);
+
+    expect(claimed.deliveries[0]?.streamId).toBe("1710000000003-0");
+    expect(xGroupCreate).toHaveBeenCalledWith("relay:ai:results", "relay-api-results", "0", {
+      MKSTREAM: true
+    });
+    expect(xAck).toHaveBeenCalledWith(
+      "relay:ai:results",
+      "relay-api-results",
+      "1710000000003-0"
     );
   });
 });

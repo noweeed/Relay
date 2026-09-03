@@ -5,6 +5,10 @@ import { disconnectRedis } from "./config/redis";
 import { env } from "./config/env";
 import { logger } from "./config/logger";
 import { initializeSocketServer } from "./sockets/io";
+import {
+  startAiResultConsumer,
+  stopAiResultConsumer
+} from "./services/ai-result-consumer.service";
 
 /** Connects required infrastructure, starts HTTP traffic, and installs graceful shutdown hooks. */
 async function startServer(): Promise<void> {
@@ -12,6 +16,7 @@ async function startServer(): Promise<void> {
 
   const server = createServer(createApp());
   initializeSocketServer(server);
+  startAiResultConsumer();
 
   server.listen(env.PORT, () => {
     logger.info({ port: env.PORT }, "Relay API is listening");
@@ -21,7 +26,8 @@ async function startServer(): Promise<void> {
   const shutdown = (signal: NodeJS.Signals): void => {
     logger.info({ signal }, "Graceful shutdown started");
     server.close(() => {
-      void Promise.all([disconnectDatabase(), disconnectRedis()])
+      void stopAiResultConsumer()
+        .then(() => Promise.all([disconnectDatabase(), disconnectRedis()]))
         .then(() => process.exit(0))
         .catch((error: unknown) => {
           // Pino recognizes `err` and serializes its message, stack, and error code.

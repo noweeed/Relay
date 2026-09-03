@@ -2,6 +2,8 @@
 
 Relay turns meetings into reviewable, traceable project work.
 
+The v0.5 path accepts transcript meetings, processes them asynchronously through Redis and a Python LangGraph worker, safely chunks long transcripts, persists evidence-backed candidates, and lets project members edit, approve, reject, or bulk-review them. Approved tasks retain their meeting, transcript segment, quote, and timestamp source.
+
 ## Project layout
 
 ```text

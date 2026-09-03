@@ -1,6 +1,7 @@
 import mongoose, { Types } from "mongoose";
 import { Membership, type ProjectRole } from "../models/Membership.model";
 import { Meeting } from "../models/Meeting.model";
+import { AiJobLedger } from "../models/AiJobLedger.model";
 import {
   Project,
   type KanbanColumn,
@@ -161,6 +162,9 @@ export async function deleteProject(projectId: string): Promise<void> {
     await TranscriptSegment.deleteMany({ projectId }, { session });
     await Meeting.deleteMany({ projectId }, { session });
   });
+  // This collection may not exist until the first AI result; creating it inside a
+  // transaction makes MongoDB retry forever on a brand-new installation.
+  await AiJobLedger.deleteMany({ projectId });
 }
 
 /** Joins memberships with public user fields without exposing password hashes. */

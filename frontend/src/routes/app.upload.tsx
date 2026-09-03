@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
-import { FileAudio, Loader2 } from "lucide-react";
+import { useRef, useState } from "react";
+import { FileAudio, Loader2, Upload } from "lucide-react";
 import { PageHeader } from "@/components/relay/primitives";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,11 +26,13 @@ export const Route = createFileRoute("/app/upload")({
 /** Creates the pasted-transcript meeting supported by the current backend. */
 function UploadPage() {
   const navigate = useNavigate();
-  const { activeProject, createTranscriptMeeting } = useRelay();
+  const { activeProject, createAudioMeeting, createTranscriptMeeting } = useRelay();
   const [title, setTitle] = useState("");
   const [transcript, setTranscript] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [audioFile, setAudioFile] = useState<File | null>(null);
+  const audioInput = useRef<HTMLInputElement>(null);
 
   /** Validates the form, persists the transcript, then opens its parsed segments. */
   async function handleSubmit() {
@@ -51,18 +53,35 @@ function UploadPage() {
     }
   }
 
+  async function handleAudioSubmit() {
+    if (!title.trim() || !audioFile) {
+      setError("Add a meeting title and choose an MP3, WAV, or M4A file.");
+      return;
+    }
+    setSubmitting(true);
+    setError(null);
+    try {
+      const meeting = await createAudioMeeting(title.trim(), audioFile);
+      await navigate({ to: "/app/meetings/$meetingId", params: { meetingId: meeting.id } });
+    } catch (requestError) {
+      setError(apiErrorMessage(requestError));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   return (
     <>
       <PageHeader
         title="Add meeting"
-        description="Paste a transcript now. Audio upload and AI task extraction arrive in later milestones."
+        description="Paste a transcript or securely upload meeting audio."
       />
 
       <div className="flex justify-center px-6 py-8 md:px-8">
         <Tabs defaultValue="transcript" className="w-full max-w-2xl">
           <TabsList>
             <TabsTrigger value="transcript">Transcript</TabsTrigger>
-            <TabsTrigger value="audio">Audio (coming later)</TabsTrigger>
+            <TabsTrigger value="audio">Audio</TabsTrigger>
           </TabsList>
 
           <TabsContent value="transcript" className="mt-5 space-y-4">
@@ -100,14 +119,49 @@ function UploadPage() {
             </Button>
           </TabsContent>
 
-          <TabsContent value="audio" className="mt-5">
-            <div className="rounded-xl border border-dashed border-border bg-card px-6 py-12 text-center">
-              <FileAudio className="mx-auto size-6 text-muted-foreground" />
-              <p className="mt-3 text-[14px] font-medium">Audio upload is planned for v0.7</p>
-              <p className="mt-1 text-[13px] text-muted-foreground">
-                Use the transcript tab for the currently implemented meeting flow.
-              </p>
+          <TabsContent value="audio" className="mt-5 space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="audio-meeting-title">Meeting title</Label>
+              <Input
+                id="audio-meeting-title"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                placeholder="Weekly Product Sync"
+                maxLength={200}
+              />
             </div>
+            <button
+              type="button"
+              className="w-full rounded-xl border border-dashed border-border bg-card px-6 py-12 text-center transition-colors hover:bg-muted/40"
+              onClick={() => audioInput.current?.click()}
+            >
+              <FileAudio className="mx-auto size-6 text-muted-foreground" />
+              <p className="mt-3 text-[14px] font-medium">
+                {audioFile ? audioFile.name : "Choose meeting audio"}
+              </p>
+              <p className="mt-1 text-[13px] text-muted-foreground">
+                MP3, WAV, or M4A · up to 25 MB
+              </p>
+            </button>
+            <input
+              ref={audioInput}
+              className="sr-only"
+              type="file"
+              accept="audio/mpeg,audio/wav,audio/x-wav,audio/mp4,audio/x-m4a,.mp3,.wav,.m4a"
+              onChange={(event) => setAudioFile(event.target.files?.[0] ?? null)}
+            />
+            {error ? <p className="text-[13px] text-destructive">{error}</p> : null}
+            <Button
+              disabled={submitting || !activeProject || !audioFile}
+              onClick={() => void handleAudioSubmit()}
+            >
+              {submitting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Upload className="size-4" />
+              )}
+              {submitting ? "Uploading audio…" : "Upload audio"}
+            </Button>
           </TabsContent>
         </Tabs>
       </div>

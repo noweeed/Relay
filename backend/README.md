@@ -77,6 +77,7 @@ Current API groups:
 - `/api/projects/*` — project CRUD and role-based membership management
 - `/api/projects/:projectId/tasks/*` — Kanban task CRUD, filtering, grouping, and activity history
 - `/api/projects/:projectId/kanban/columns/*` — owner/admin custom workflow configuration
+- `/api/projects/:projectId/meetings/*` — transcript and audio meetings, processing status, source transcript/audio, linked tasks, and reprocessing
 
 When MongoDB is connected, `/health` returns HTTP 200 and `database.status: connected`. It returns HTTP 503 when the API is alive but MongoDB is unavailable.
 
@@ -85,6 +86,12 @@ When MongoDB is connected, `/health` returns HTTP 200 and `database.status: conn
 See [`ai-service/README.md`](ai-service/README.md). The AI service is a worker behind Node, not a separate frontend-facing API.
 
 For v0.5, set `REDIS_URL` in `backend/.env` and the Python worker's `.env` to the same Redis instance. Node publishes to `AI_JOB_STREAM`; Python returns contract-validated results through `AI_RESULT_STREAM`. Stream names normally keep their provided defaults.
+
+The v0.6 transport uses durable Redis consumer groups. Each API and worker process gets a unique host/process consumer name by default, reclaims abandoned deliveries after `AI_PENDING_IDLE_MS`, and acknowledges only after its durable write succeeds. Provider retries use exponential backoff; terminal failures and malformed envelopes are preserved in `AI_DEAD_LETTER_STREAM`.
+
+Long transcripts are processed in bounded chunks by the Python worker. `TRANSCRIPT_CHUNK_MAX_CHARS`, `TRANSCRIPT_CHUNK_OVERLAP_SEGMENTS`, and `TRANSCRIPT_CHUNK_CONCURRENCY` tune context size, boundary overlap, and simultaneous provider calls. The defaults are `12000`, `1`, and `3`.
+
+The v0.7 upload foundation accepts one `audio` multipart field at `POST /api/projects/:projectId/meetings/audio`. MP3, WAV, and M4A uploads are bounded by `AUDIO_MAX_BYTES`, checked against both MIME type and container signature, and stored behind an opaque key in `AUDIO_STORAGE_DIR`. Audio is retrieved only through the project-authorized meeting endpoint; filesystem paths are never returned to clients. The local adapter is for development and tests while the hosted S3-compatible/Cloudinary adapter and Python transcription stage are still pending.
 
 ## How the authentication code is organized
 

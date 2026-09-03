@@ -799,6 +799,48 @@ export const openApiDocument: OpenAPIV3.Document = {
         },
       },
     },
+    "/api/projects/{projectId}/meetings/audio": {
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }],
+      post: {
+        tags: ["Meetings"],
+        summary: "Upload an audio meeting",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "multipart/form-data": {
+              schema: {
+                type: "object",
+                required: ["title", "audio"],
+                properties: {
+                  title: { type: "string", minLength: 2, maxLength: 200 },
+                  audio: { type: "string", format: "binary" },
+                },
+              },
+            },
+          },
+        },
+        responses: {
+          "201": { description: "Audio stored and meeting created" },
+          "400": { description: "Missing, unsupported, spoofed, or oversized audio" },
+        },
+      },
+    },
+    "/api/projects/{projectId}/meetings/{meetingId}/audio": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        { $ref: "#/components/parameters/MeetingId" },
+      ],
+      get: {
+        tags: ["Meetings"],
+        summary: "Get project-private meeting audio",
+        security: [{ bearerAuth: [] }],
+        responses: {
+          "200": { description: "Audio bytes" },
+          "404": { description: "Meeting audio not found" },
+        },
+      },
+    },
     "/api/projects/{projectId}/meetings/{meetingId}/transcript": {
       parameters: [
         { $ref: "#/components/parameters/ProjectId" },

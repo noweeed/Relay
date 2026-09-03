@@ -19,7 +19,7 @@ export type Task = {
   id: string;
   projectId: string;
   title: string;
-  description: string;
+  description?: string;
   assigneeId: string | null;
   due: string | null;
   priority: Priority;
@@ -68,12 +68,14 @@ export type Candidate = {
   id: string;
   meetingId: string;
   title: string;
+  description: string;
   assigneeId: string | null;
   due: string | null;
   priority: Priority;
   timestamp: string;
   quote: string;
-  state: "pending" | "approved" | "rejected";
+  state: "pending" | "approved" | "rejected" | "duplicate_pending";
+  createdTaskId?: string;
   duplicateOf?: { taskId: string; confidence: "high" | "medium"; existingDue: string | null };
 };
 

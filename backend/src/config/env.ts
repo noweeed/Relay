@@ -6,6 +6,10 @@ const optionalUrl = z.preprocess(
   (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
   z.url().optional()
 );
+const optionalText = z.preprocess(
+  (value) => (typeof value === "string" && value.trim() === "" ? undefined : value),
+  z.string().trim().min(1).optional()
+);
 
 const environmentSchema = z.object({
   NODE_ENV: z
@@ -40,6 +44,13 @@ const environmentSchema = z.object({
   AI_JOB_SCHEMA_VERSION: z.coerce.number().pipe(z.literal(1)).default(1),
   AI_RESULT_SCHEMA_VERSION: z.coerce.number().pipe(z.literal(1)).default(1),
   AI_WORKER_CONSUMER_GROUP: z.string().trim().min(1).default("relay-ai-workers"),
+  AI_RESULT_CONSUMER_GROUP: z.string().trim().min(1).default("relay-api-results"),
+  AI_RESULT_CONSUMER_NAME: optionalText,
+  AI_PENDING_IDLE_MS: z.coerce.number().int().positive().default(30_000),
+  AI_CONSUMER_RETRY_BASE_MS: z.coerce.number().int().positive().default(500),
+  AI_CONSUMER_RETRY_MAX_MS: z.coerce.number().int().positive().default(30_000),
+  AUDIO_STORAGE_DIR: z.string().trim().min(1).default(".relay-data/audio"),
+  AUDIO_MAX_BYTES: z.coerce.number().int().positive().max(500_000_000).default(25_000_000),
   SEED_USER_PASSWORD: z.string().min(12).optional(),
 });
 

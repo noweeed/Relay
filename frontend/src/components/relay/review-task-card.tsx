@@ -14,10 +14,9 @@ import {
 import { cn } from "@/lib/utils";
 import {
   formatDate,
-  members,
-  memberById,
   priorityLabel,
   type Candidate,
+  type Member,
   type Meeting,
   type Priority,
   type Task,
@@ -78,6 +77,7 @@ export function ReviewTaskCard({
   onReject,
   onEdit,
   onResolveDuplicate,
+  members,
 }: {
   candidate: Candidate;
   meeting?: Meeting | undefined;
@@ -85,9 +85,10 @@ export function ReviewTaskCard({
   selected: boolean;
   onSelect: (v: boolean) => void;
   onApprove: () => Promise<void> | void;
-  onReject: () => void;
+  onReject: () => Promise<void> | void;
   onEdit: (patch: Partial<Candidate>) => void;
   onResolveDuplicate: (action: "update" | "separate" | "ignore") => void;
+  members: Member[];
 }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -96,9 +97,11 @@ export function ReviewTaskCard({
 
   async function approve() {
     setBusy(true);
-    await new Promise((r) => setTimeout(r, 550));
-    await onApprove();
-    setBusy(false);
+    try {
+      await onApprove();
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -114,7 +117,7 @@ export function ReviewTaskCard({
         <Checkbox
           checked={selected}
           onCheckedChange={(v) => onSelect(!!v)}
-          disabled={approved}
+          disabled={approved || rejected}
           aria-label={`Select ${candidate.title}`}
           className="mt-0.5"
         />
@@ -181,7 +184,8 @@ export function ReviewTaskCard({
               <div>
                 <dt className="meta-text">Assignee</dt>
                 <dd className="text-[13.5px]">
-                  {memberById(candidate.assigneeId)?.name ?? "Unassigned"}
+                  {members.find((member) => member.id === candidate.assigneeId)?.name ??
+                    "Unassigned"}
                 </dd>
               </div>
               <div>
@@ -219,9 +223,7 @@ export function ReviewTaskCard({
                 <Check className="size-4" /> Added to the board
               </span>
             ) : rejected ? (
-              <Button size="sm" variant="outline" onClick={() => onEdit({ state: "pending" })}>
-                Restore
-              </Button>
+              <span className="text-[13px] text-muted-foreground">Kept for review history</span>
             ) : (
               <>
                 <Button size="sm" onClick={approve} disabled={busy}>
@@ -238,7 +240,7 @@ export function ReviewTaskCard({
                 <Button size="sm" variant="outline" onClick={() => setEditing((v) => !v)}>
                   <Pencil className="size-4" /> {editing ? "Done editing" : "Edit"}
                 </Button>
-                <Button size="sm" variant="ghost" onClick={onReject}>
+                <Button size="sm" variant="ghost" onClick={() => void onReject()}>
                   <X className="size-4" /> Reject
                 </Button>
               </>

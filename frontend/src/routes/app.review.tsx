@@ -27,34 +27,58 @@ export const Route = createFileRoute("/app/review")({
 });
 
 function ReviewPage() {
-  const { candidates, meetings, tasks, approveCandidate, setCandidateState, resolveDuplicate } =
-    useRelay();
+  const {
+    candidates,
+    candidatesLoading,
+    candidatesError,
+    meetings,
+    members,
+    tasks,
+    updateCandidate,
+    approveCandidate,
+    rejectCandidate,
+    bulkApproveCandidates,
+    bulkRejectCandidates,
+    resolveDuplicate,
+  } = useRelay();
   const navigate = useNavigate();
   const [selected, setSelected] = useState<string[]>([]);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [edits, setEdits] = useState<Record<string, Partial<Candidate>>>({});
 
   const list = candidates.map((c) => ({ ...c, ...(edits[c.id] ?? {}) }));
-  const pending = list.filter((c) => c.state === "pending");
+  const pending = list.filter((c) => c.state === "pending" || c.state === "duplicate_pending");
 
-  function patch(id: string, p: Partial<Candidate>) {
-    if (p.state) setCandidateState(id, p.state);
+  async function patch(id: string, p: Partial<Candidate>) {
     setEdits((prev) => ({ ...prev, [id]: { ...(prev[id] ?? {}), ...p } }));
+    try {
+      await updateCandidate(id, p);
+      setEdits((prev) => {
+        const next = { ...prev };
+        delete next[id];
+        return next;
+      });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Candidate could not be updated");
+    }
   }
 
   async function bulk(action: "approve" | "reject") {
     setBulkBusy(true);
-    await new Promise((r) => setTimeout(r, 700));
-    selected.forEach((id) =>
-      action === "approve" ? approveCandidate(id) : setCandidateState(id, "rejected"),
-    );
-    toast.success(
-      action === "approve"
-        ? `${selected.length} tasks added to the board`
-        : `${selected.length} tasks rejected`,
-    );
-    setSelected([]);
-    setBulkBusy(false);
+    try {
+      if (action === "approve") await bulkApproveCandidates(selected);
+      else await bulkRejectCandidates(selected);
+      toast.success(
+        action === "approve"
+          ? `${selected.length} tasks added to the board`
+          : `${selected.length} tasks rejected`,
+      );
+      setSelected([]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Candidates could not be reviewed");
+    } finally {
+      setBulkBusy(false);
+    }
   }
 
   return (
@@ -68,7 +92,13 @@ function ReviewPage() {
         }
       />
 
-      {pending.length === 0 ? (
+      {candidatesLoading ? (
+        <div className="flex items-center gap-2 px-6 py-8 text-sm text-muted-foreground md:px-8">
+          <Loader2 className="size-4 animate-spin" /> Loading extracted tasks...
+        </div>
+      ) : candidatesError ? (
+        <div className="px-6 py-8 text-sm text-destructive md:px-8">{candidatesError}</div>
+      ) : pending.length === 0 ? (
         <div className="px-6 py-8 md:px-8">
           <EmptyState
             icon={ClipboardCheck}
@@ -112,17 +142,28 @@ function ReviewPage() {
                 key={c.id}
                 candidate={c}
                 meeting={meetings.find((m) => m.id === c.meetingId)}
+                members={members}
                 existing={tasks.find((t) => t.id === c.duplicateOf?.taskId)}
                 selected={selected.includes(c.id)}
                 onSelect={(v) =>
                   setSelected((prev) => (v ? [...prev, c.id] : prev.filter((id) => id !== c.id)))
                 }
-                onApprove={() => {
-                  approveCandidate(c.id);
-                  toast.success("Task added to the board");
+                onApprove={async () => {
+                  try {
+                    await approveCandidate(c.id);
+                    toast.success("Task added to the board");
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Approval failed");
+                  }
                 }}
-                onReject={() => setCandidateState(c.id, "rejected")}
-                onEdit={(p) => patch(c.id, p)}
+                onReject={async () => {
+                  try {
+                    await rejectCandidate(c.id);
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : "Rejection failed");
+                  }
+                }}
+                onEdit={(p) => void patch(c.id, p)}
                 onResolveDuplicate={(action) => {
                   resolveDuplicate(c.id, action);
                   toast.success(

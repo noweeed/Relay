@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import * as meetingService from "../services/meeting.service";
 import { ApiError } from "../utils/ApiError";
 import type {
+  CreateAudioMeetingInput,
   CreateMeetingInput,
   ListMeetingsQuery,
   UpdateMeetingStatusInput
@@ -36,6 +37,31 @@ export async function createMeeting(request: Request, response: Response): Promi
     request.body as CreateMeetingInput
   );
   response.status(201).json({ success: true, data: meeting });
+}
+
+/** Stores one multipart audio meeting and returns before transcription begins. */
+export async function createAudioMeeting(request: Request, response: Response): Promise<void> {
+  if (!request.file) {
+    throw new ApiError(400, "VALIDATION_ERROR", "An audio file is required.");
+  }
+  const context = getMeetingContext(request);
+  const meeting = await meetingService.createAudioMeeting(
+    context.projectId,
+    context.userId,
+    request.body as CreateAudioMeetingInput,
+    request.file
+  );
+  response.status(201).json({ success: true, data: meeting });
+}
+
+/** Streams project-private meeting audio after membership authorization. */
+export async function getMeetingAudio(request: Request, response: Response): Promise<void> {
+  const context = getMeetingContext(request);
+  const audio = await meetingService.getMeetingAudio(context.projectId, getMeetingId(request));
+  response.setHeader("Content-Type", audio.mimeType);
+  response.setHeader("Content-Length", audio.body.length);
+  response.setHeader("Content-Disposition", `inline; filename*=UTF-8''${encodeURIComponent(audio.originalName)}`);
+  response.send(audio.body);
 }
 
 /** Lists meetings for the authorized project. */
@@ -83,6 +109,10 @@ export async function updateMeetingStatus(request: Request, response: Response):
 /** Resets a failed meeting to allow reprocessing. */
 export async function requestReprocess(request: Request, response: Response): Promise<void> {
   const context = getMeetingContext(request);
-  const meeting = await meetingService.requestReprocess(context.projectId, getMeetingId(request));
+  const meeting = await meetingService.requestReprocess(
+    context.projectId,
+    getMeetingId(request),
+    context.userId
+  );
   response.json({ success: true, data: meeting });
 }

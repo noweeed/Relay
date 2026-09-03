@@ -50,3 +50,23 @@ export const aiResultEnvelopeSchema = z.discriminatedUnion("status", [
 
 export type AiJobEnvelope = z.infer<typeof aiJobEnvelopeSchema>;
 export type AiResultEnvelope = z.infer<typeof aiResultEnvelopeSchema>;
+
+/** Validates one evidence-backed task returned by the Python meeting graph. */
+export const meetingExtractedTaskSchema = z.strictObject({
+  title: z.string().trim().min(2).max(200),
+  description: z.string().trim().max(5_000).nullable().optional(),
+  assigneeName: z.string().trim().min(1).max(100).nullable().optional(),
+  dueDate: z.iso.date().nullable().optional(),
+  priority: z.enum(["low", "medium", "high"]),
+  segmentOrder: z.number().int().nonnegative(),
+  sourceQuote: z.string().trim().min(1).max(2_000),
+  confidence: z.number().min(0).max(1).nullable().optional()
+});
+
+/** Validates the successful payload before AI output is persisted in MongoDB. */
+export const meetingExtractionResultSchema = z.strictObject({
+  meetingId: z.string().min(1),
+  tasks: z.array(meetingExtractedTaskSchema)
+});
+
+export type MeetingExtractionResult = z.infer<typeof meetingExtractionResultSchema>;

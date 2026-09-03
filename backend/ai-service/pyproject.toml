@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "Python AI worker for Relay"
 requires-python = ">=3.12"
 dependencies = [
+  "groq>=0.31",
+  "httpx>=0.28",
   "langgraph>=0.6",
   "pydantic>=2.11",
   "pydantic-settings>=2.10",

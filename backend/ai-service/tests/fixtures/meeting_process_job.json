@@ -1,0 +1,28 @@
+{
+  "jobId": "fixture-job-1",
+  "jobType": "meeting.process",
+  "schemaVersion": 1,
+  "projectId": "fixture-project-1",
+  "initiatingUserId": "fixture-user-1",
+  "resourceId": "fixture-meeting-1",
+  "correlationId": "fixture-correlation-1",
+  "createdAt": "2026-09-03T08:00:00Z",
+  "payload": {
+    "meetingId": "fixture-meeting-1",
+    "title": "Contract fixture planning",
+    "meetingDate": "2026-09-03",
+    "projectMembers": [
+      { "userId": "fixture-user-1", "name": "Naveed" }
+    ],
+    "segments": [
+      {
+        "segmentId": "fixture-segment-1",
+        "order": 0,
+        "speaker": "Naveed",
+        "text": "I will finish the candidate review API by Friday.",
+        "startMs": 42000,
+        "endMs": 47000
+      }
+    ]
+  }
+}

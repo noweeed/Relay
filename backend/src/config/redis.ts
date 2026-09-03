@@ -13,7 +13,16 @@ export function getRedisClient(): RelayRedisClient {
   }
 
   if (!redisClient) {
-    redisClient = createClient({ url: env.REDIS_URL });
+    redisClient = createClient({
+      url: env.REDIS_URL,
+      socket: {
+        connectTimeout: 10_000,
+        keepAlive: true,
+        keepAliveInitialDelay: 5_000,
+        reconnectStrategy: (retries) =>
+          Math.min(env.AI_CONSUMER_RETRY_BASE_MS * 2 ** Math.min(retries, 8), env.AI_CONSUMER_RETRY_MAX_MS)
+      }
+    });
     redisClient.on("error", (error: unknown) => {
       logger.error({ err: error }, "Redis client error");
     });

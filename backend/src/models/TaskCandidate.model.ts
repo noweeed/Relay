@@ -24,6 +24,8 @@ export interface TaskCandidateDocument {
   sourceQuote: string;
   confidence?: number;
   status: TaskCandidateStatus;
+  sourceJobId: string;
+  sourceTaskIndex: number;
   createdTaskId?: Types.ObjectId;
   embedding?: number[];
   createdAt: Date;
@@ -44,6 +46,9 @@ const taskCandidateSchema = new Schema<TaskCandidateDocument>(
     // Confidence and embeddings guide internal AI behavior and must not be selected by normal reads.
     confidence: { type: Number, min: 0, max: 1, select: false },
     status: { type: String, enum: TASK_CANDIDATE_STATUSES, required: true, default: "pending" },
+    // These fields make replaying the same Redis result safe and idempotent.
+    sourceJobId: { type: String, required: true, trim: true },
+    sourceTaskIndex: { type: Number, required: true, min: 0 },
     createdTaskId: { type: Schema.Types.ObjectId, ref: "Task" },
     embedding: { type: [Number], select: false }
   },
@@ -51,5 +56,9 @@ const taskCandidateSchema = new Schema<TaskCandidateDocument>(
 );
 
 taskCandidateSchema.index({ projectId: 1, meetingId: 1, status: 1, createdAt: 1 });
+taskCandidateSchema.index(
+  { sourceJobId: 1, sourceTaskIndex: 1 },
+  { unique: true, sparse: true }
+);
 
 export const TaskCandidate = model<TaskCandidateDocument>("TaskCandidate", taskCandidateSchema);

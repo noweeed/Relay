@@ -105,7 +105,9 @@ Python meeting graph
       |
       |-- load authorized meeting context
       |-- normalize transcript
-      |-- extract task candidates
+      |-- split long transcripts with segment overlap
+      |-- extract task candidates per bounded chunk
+      |-- reconcile repeated overlap candidates
       |-- suggest project-member assignees
       |-- generate embeddings
       |-- search for possible duplicates
@@ -130,7 +132,7 @@ meeting.ready_for_review event
 Human review
 ```
 
-The transcript storage path (meeting creation, transcript parsing, segment persistence, meeting list/detail/transcript/tasks endpoints, status state machine, and reprocessing) is implemented in v0.4. The AI extraction and human review steps become demonstrable in v0.5.
+The transcript storage path is implemented in v0.4. In v0.5, Node dispatches stored meetings through Redis, the Python worker runs the `normalize → chunk → extract → reconcile → prepare review result` LangGraph, and Node validates and persists traceable candidates. Chunk overlap preserves local context; deterministic reconciliation removes candidates repeated because of that overlap. The review API keeps edits and decisions in Node and transactionally creates permanently sourced tasks only after approval.
 
 ## 4. Audio meeting flow
 

@@ -60,4 +60,32 @@ Every project starts with Todo, In Progress, and Done columns. Owners/admins may
 
 Tasks store stable `columnId` values, so renaming a column does not rewrite tasks. Task lists accept `columnId`, `assignee`, `priority`, `dueAfter`, `dueBefore`, and `q` filters. Passing `groupBy=column` returns ordered column metadata and task arrays, including empty columns. Every task endpoint checks project membership; task deletion additionally requires an owner or admin role.
 
+Transcript meeting endpoints:
+
+- `POST /api/projects/:projectId/meetings` — create a transcript meeting and queue extraction
+- `POST /api/projects/:projectId/meetings/transcript` — explicit alias for transcript creation
+- `POST /api/projects/:projectId/meetings/audio` — multipart upload with `title` and one `audio` file
+- `GET /api/projects/:projectId/meetings` — list meetings, optionally filtered by status
+- `GET /api/projects/:projectId/meetings/:meetingId`
+- `GET /api/projects/:projectId/meetings/:meetingId/transcript`
+- `GET /api/projects/:projectId/meetings/:meetingId/audio` — membership-protected audio bytes
+- `GET /api/projects/:projectId/meetings/:meetingId/tasks`
+- `GET /api/projects/:projectId/meetings/:meetingId/status`
+- `POST /api/projects/:projectId/meetings/:meetingId/reprocess` — retry a failed meeting
+
+Meeting creation returns after Node stores the transcript and queues a versioned Redis job. The Python worker transparently chunks long transcripts, extracts bounded chunks concurrently, reconciles overlap duplicates, and returns a schema-validated result for Node to persist. This does not change the HTTP contract or bypass human review.
+
+Audio uploads currently complete the first v0.7 boundary: multipart parsing, a configurable size limit, MIME plus container-signature validation, filename sanitization, opaque local storage, meeting metadata, and authenticated retrieval. The endpoint returns after durable storage. Transcription/job dispatch and hosted object-storage adapters remain pending, so new audio meetings remain in `created` until that stage is connected.
+
+Candidate review endpoints:
+
+- `GET /api/projects/:projectId/meetings/:meetingId/candidates` — optionally filter by `status`
+- `PATCH /api/projects/:projectId/meetings/:meetingId/candidates/:candidateId`
+- `POST /api/projects/:projectId/meetings/:meetingId/candidates/:candidateId/approve`
+- `POST /api/projects/:projectId/meetings/:meetingId/candidates/:candidateId/reject`
+- `POST /api/projects/:projectId/meetings/:meetingId/candidates/bulk-approve`
+- `POST /api/projects/:projectId/meetings/:meetingId/candidates/bulk-reject`
+
+All project members may review candidates. Edits accept `title`, `description`, `suggestedAssigneeId`, `suggestedDueDate`, and `suggestedPriority`; the assignee must still belong to the project. Bulk actions accept `{ "candidateIds": ["..."] }` and commit atomically within one meeting. Approval creates a Todo task and permanently copies the meeting ID, transcript segment ID, verbatim quote, and timestamp onto its `source`. The task's `extracted` and `approved` activity records and the candidate's `createdTaskId` are written in the same transaction. Rejected candidates remain stored for history.
+
 Success responses use `{ "success": true, "data": ... }`. Errors use the shared `{ "success": false, "error": ... }` contract from the PRD.

@@ -1,8 +1,8 @@
 # Relay Development Progress
 
-**Last updated:** August 26, 2026  
-**Current milestone:** v0.5 — Python Extraction and Human Review  
-**Overall status:** v0.4 complete and verified; v0.5 Redis transport complete and meeting graph next
+**Last updated:** September 3, 2026
+**Current milestone:** v0.7 — Audio Meetings
+**Overall status:** v0.6 complete; background meeting processing is durable, retryable, idempotent, and live-updating
 
 This is the living implementation tracker. Update it when work begins, acceptance criteria change, or a milestone is completed.
 
@@ -48,8 +48,8 @@ This is the living implementation tracker. Update it when work begins, acceptanc
 | `npm run typecheck`         | Passed    |
 | `npm run lint`              | Passed    |
 | `npm run build`             | Passed    |
-| Node unit/integration tests | 33 passed |
-| Python unit/schema tests    | 10 passed |
+| Node unit/integration tests | 34 passed |
+| Python unit/schema tests    | 23 passed |
 | Ruff                        | Passed    |
 | mypy                        | Passed    |
 | Python worker `--check`     | Passed    |
@@ -58,9 +58,12 @@ This is the living implementation tracker. Update it when work begins, acceptanc
 ## Immediate next actions
 
 1. [x] Set up Redis Streams AI job/result transport.
-2. [>] Build the LangGraph meeting extraction graph.
-3. [>] Implement TaskCandidate review endpoints.
-4. [ ] Connect the frontend review queue to candidate endpoints.
+2. [x] Build the LangGraph meeting extraction graph.
+3. [x] Implement the LLM provider and structured extraction prompt.
+4. [x] Connect meeting dispatch, Python worker execution, and Node result persistence.
+5. [x] Add long-transcript chunking and reconciliation.
+6. [x] Implement TaskCandidate review endpoints.
+7. [x] Connect the frontend review queue to candidate endpoints.
 
 ## Milestone roadmap
 
@@ -121,7 +124,7 @@ This is the living implementation tracker. Update it when work begins, acceptanc
 - [x] Existing-member project ownership transfer
 - [x] Google Identity sign-in/sign-up flow
 - [x] Real transcript meeting creation, listing, parsed detail, and linked-task integration
-- [ ] Real candidate review integration
+- [x] Real candidate review integration
 
 ### v0.4 — Transcript Meetings
 
@@ -143,44 +146,46 @@ This is the living implementation tracker. Update it when work begins, acceptanc
 - [x] Redis Streams AI job/result transport
 - [x] Matching Zod contracts in Node
 - [x] Python Pydantic meeting schemas
-- [ ] LangGraph meeting graph
-- [ ] Transcript normalization node
-- [ ] LLM provider abstraction
-- [ ] Extraction prompt and structured output
-- [ ] Long-transcript chunking and reconciliation
-- [ ] Assignee suggestion against project members
+- [x] LangGraph meeting graph
+- [x] Transcript normalization node
+- [x] LLM provider abstraction
+- [x] Extraction prompt and structured output
+- [x] Meeting creation/reprocessing job dispatch
+- [x] Python Redis worker loop and LangGraph execution
+- [x] Long-transcript chunking and reconciliation
+- [x] Unambiguous assignee matching against project members
 - [x] TaskCandidate model
-- [ ] Node result validation and idempotent persistence
-- [ ] Candidate list/edit/approve/reject endpoints
-- [ ] Bulk approve/reject endpoints
-- [ ] Permanent task source traceability
-- [ ] AI provider mocks and contract fixtures
+- [x] Node result validation, stale-result rejection, and idempotent persistence
+- [x] Candidate list/edit/approve/reject endpoints
+- [x] Bulk approve/reject endpoints
+- [x] Permanent task source traceability
+- [x] AI provider mocks and contract fixtures
 
 **Acceptance demo:** Paste transcript → extract review candidates → approve candidate → task appears on the board with its meeting source.
 
 ### v0.6 — Async Processing Hardening
 
-- [ ] Redis production configuration
-- [ ] Redis consumer groups
-- [ ] Independently deployed Python worker loop
-- [ ] Retry and backoff policy
-- [ ] Dead-letter stream
-- [ ] Node result consumer recovery
-- [ ] Idempotency ledger by `jobId`
-- [ ] Meeting status transition enforcement
-- [ ] Socket.IO authentication and project/meeting rooms
-- [ ] Processing progress events
-- [ ] Failure and redelivery tests
+- [x] Redis production configuration
+- [x] Redis consumer groups
+- [x] Independently deployed Python worker loop
+- [x] Retry and backoff policy
+- [x] Dead-letter stream
+- [x] Node result consumer recovery
+- [x] Idempotency ledger by `jobId`
+- [x] Meeting status transition enforcement
+- [x] Socket.IO authentication and project/meeting rooms
+- [x] Processing progress events
+- [x] Failure and redelivery tests
 
 **Acceptance demo:** Meeting processing survives retries and emits live progress without holding the upload request open.
 
 ### v0.7 — Audio Meetings
 
-- [ ] Multipart upload endpoint
-- [ ] Audio MIME and size validation
-- [ ] Filename sanitization
+- [x] Multipart upload endpoint
+- [x] Audio MIME, container-signature, and size validation
+- [x] Filename sanitization
 - [ ] Cloudinary or S3-compatible storage adapter
-- [ ] Signed or secured audio access
+- [x] Project-membership-secured audio access
 - [ ] Python transcription provider abstraction
 - [ ] Timestamped transcript segmentation
 - [ ] Speaker labels without biometric identity claims

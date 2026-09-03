@@ -8,7 +8,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  initialCandidates,
   initialNotifications,
   initialTasks,
   type ActivityEntry,
@@ -23,7 +22,8 @@ import {
   type Task,
   type TranscriptSegment,
 } from "./relay-data";
-import { apiErrorMessage, apiRequest } from "./api-client";
+import { apiErrorMessage, apiRequest, getAccessToken } from "./api-client";
+import { createRelaySocket, type MeetingProgressEvent } from "./relay-socket";
 
 type NewTask = {
   title: string;
@@ -86,6 +86,55 @@ type ApiTranscriptSegment = {
   text: string;
   startMs?: number;
 };
+
+type ApiCandidate = {
+  id: string;
+  meetingId: string;
+  title: string;
+  description?: string;
+  suggestedAssigneeId?: string;
+  suggestedDueDate?: string;
+  suggestedPriority: Priority;
+  sourceQuote: string;
+  sourceTimestampMs?: number;
+  status: Candidate["state"];
+  createdTaskId?: string;
+};
+
+function mapApiCandidate(candidate: ApiCandidate): Candidate {
+  return {
+    id: candidate.id,
+    meetingId: candidate.meetingId,
+    title: candidate.title,
+    description: candidate.description ?? "",
+    assigneeId: candidate.suggestedAssigneeId ?? null,
+    due: candidate.suggestedDueDate ? candidate.suggestedDueDate.slice(0, 10) : null,
+    priority: candidate.suggestedPriority,
+    timestamp:
+      candidate.sourceTimestampMs === undefined
+        ? "Transcript"
+        : formatTimestamp(candidate.sourceTimestampMs),
+    quote: candidate.sourceQuote,
+    state: candidate.status,
+    ...(candidate.createdTaskId ? { createdTaskId: candidate.createdTaskId } : {}),
+  };
+}
+
+function groupCandidatesByMeeting(
+  candidates: Candidate[],
+  ids: string[],
+): Map<string, Candidate[]> {
+  const selected = new Set(ids);
+  const grouped = new Map<string, Candidate[]>();
+  for (const candidate of candidates) {
+    if (!selected.has(candidate.id)) continue;
+    grouped.set(candidate.meetingId, [...(grouped.get(candidate.meetingId) ?? []), candidate]);
+  }
+  if ([...grouped.values()].reduce((count, group) => count + group.length, 0) !== selected.size) {
+    throw new Error("One or more selected candidates are no longer available.");
+  }
+  return grouped;
+}
 
 /** Converts milliseconds into a short transcript timestamp. */
 function formatTimestamp(milliseconds: number): string {
@@ -192,6 +241,8 @@ type Ctx = {
   meetingsLoading: boolean;
   meetingsError: string | null;
   candidates: Candidate[];
+  candidatesLoading: boolean;
+  candidatesError: string | null;
   notifications: Notification[];
   addTask: (task: NewTask) => Promise<Task>;
   updateTask: (id: string, patch: Partial<Task>, activityText?: string) => Promise<Task>;
@@ -199,12 +250,16 @@ type Ctx = {
   deleteTask: (id: string) => Promise<void>;
   loadTaskActivity: (id: string) => Promise<ActivityEntry[]>;
   createTranscriptMeeting: (title: string, transcript: string) => Promise<Meeting>;
+  createAudioMeeting: (title: string, audio: File) => Promise<Meeting>;
   loadMeeting: (meetingId: string) => Promise<Meeting>;
   loadMeetingTranscript: (meetingId: string) => Promise<TranscriptSegment[]>;
   loadMeetingTasks: (meetingId: string) => Promise<Task[]>;
   reprocessMeeting: (meetingId: string) => Promise<Meeting>;
-  setCandidateState: (id: string, state: Candidate["state"]) => void;
-  approveCandidate: (id: string) => void;
+  updateCandidate: (id: string, patch: Partial<Candidate>) => Promise<Candidate>;
+  approveCandidate: (id: string) => Promise<void>;
+  rejectCandidate: (id: string) => Promise<void>;
+  bulkApproveCandidates: (ids: string[]) => Promise<void>;
+  bulkRejectCandidates: (ids: string[]) => Promise<void>;
   resolveDuplicate: (id: string, action: "update" | "separate" | "ignore") => void;
   markAllRead: () => void;
   toggleRead: (id: string) => void;
@@ -228,7 +283,9 @@ export function RelayProvider({ children }: { children: ReactNode }) {
   const [meetings, setMeetings] = useState<Meeting[]>([]);
   const [meetingsLoading, setMeetingsLoading] = useState(false);
   const [meetingsError, setMeetingsError] = useState<string | null>(null);
-  const [candidates, setCandidates] = useState<Candidate[]>(initialCandidates);
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [candidatesLoading, setCandidatesLoading] = useState(false);
+  const [candidatesError, setCandidatesError] = useState<string | null>(null);
   const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
 
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
@@ -315,31 +372,87 @@ export function RelayProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
+    let refreshTimer: ReturnType<typeof setTimeout> | undefined;
+    let firstLoad = true;
     if (!activeProjectId) {
       setMeetings([]);
+      setCandidates([]);
       setMeetingsLoading(false);
+      setCandidatesLoading(false);
       return;
     }
     const projectId = activeProjectId;
 
     /** Loads only meetings belonging to the currently authorized project. */
     async function loadMeetings() {
-      setMeetingsLoading(true);
+      let processing = false;
+      if (firstLoad) {
+        setMeetingsLoading(true);
+        setCandidatesLoading(true);
+      }
       try {
         const response = await apiRequest<ApiMeeting[]>(`/projects/${projectId}/meetings`);
         if (!active) return;
-        setMeetings(response.map(mapApiMeeting));
+        const loadedMeetings = response.map(mapApiMeeting);
+        processing = loadedMeetings.some(
+          (meeting) => meeting.status === "created" || meeting.status === "processing",
+        );
+        setMeetings(loadedMeetings);
         setMeetingsError(null);
+        const candidateGroups = await Promise.all(
+          loadedMeetings.map((meeting) =>
+            apiRequest<ApiCandidate[]>(`/projects/${projectId}/meetings/${meeting.id}/candidates`),
+          ),
+        );
+        if (!active) return;
+        setCandidates(candidateGroups.flat().map(mapApiCandidate));
+        setCandidatesError(null);
       } catch (error) {
-        if (active) setMeetingsError(apiErrorMessage(error));
+        if (active) {
+          const message = apiErrorMessage(error);
+          setMeetingsError(message);
+          setCandidatesError(message);
+        }
       } finally {
-        if (active) setMeetingsLoading(false);
+        if (active) {
+          setMeetingsLoading(false);
+          setCandidatesLoading(false);
+          firstLoad = false;
+          if (processing) refreshTimer = setTimeout(() => void loadMeetings(), 3_000);
+        }
       }
     }
+
+    const token = getAccessToken();
+    const socket = token ? createRelaySocket(token) : undefined;
+    socket?.on("connect", () => socket.emit("project:join", projectId));
+    socket?.on("meeting.progress", (event: MeetingProgressEvent) => {
+      if (!active || event.projectId !== projectId) return;
+      setMeetings((previous) =>
+        previous.map((meeting) =>
+          meeting.id === event.meetingId
+            ? {
+                ...meeting,
+                status: event.status,
+                ...(event.errorMessage
+                  ? { errorMessage: event.errorMessage }
+                  : { errorMessage: undefined }),
+              }
+            : meeting,
+        ),
+      );
+      if (event.status === "ready_for_review") {
+        if (refreshTimer) clearTimeout(refreshTimer);
+        void loadMeetings();
+      }
+    });
 
     void loadMeetings();
     return () => {
       active = false;
+      if (refreshTimer) clearTimeout(refreshTimer);
+      socket?.emit("project:leave", projectId);
+      socket?.disconnect();
     };
   }, [activeProjectId]);
 
@@ -458,6 +571,24 @@ export function RelayProvider({ children }: { children: ReactNode }) {
     [activeProjectId],
   );
 
+  /** Uploads a bounded audio file through the multipart meeting endpoint. */
+  const createAudioMeeting = useCallback(
+    async (title: string, audio: File) => {
+      if (!activeProjectId) throw new Error("Create a project before adding a meeting.");
+      const form = new FormData();
+      form.set("title", title);
+      form.set("audio", audio);
+      const response = await apiRequest<ApiMeeting>(`/projects/${activeProjectId}/meetings/audio`, {
+        method: "POST",
+        body: form,
+      });
+      const meeting = mapApiMeeting(response);
+      setMeetings((previous) => [meeting, ...previous]);
+      return meeting;
+    },
+    [activeProjectId],
+  );
+
   /** Loads one meeting's current metadata through the project-scoped detail endpoint. */
   const loadMeeting = useCallback(
     async (meetingId: string) => {
@@ -524,40 +655,126 @@ export function RelayProvider({ children }: { children: ReactNode }) {
     [activeProjectId],
   );
 
-  const setCandidateState = useCallback((id: string, state: Candidate["state"]) => {
-    setCandidates((prev) => prev.map((c) => (c.id === id ? { ...c, state } : c)));
-  }, []);
+  const updateCandidate = useCallback(
+    async (id: string, patch: Partial<Candidate>) => {
+      if (!activeProjectId) throw new Error("Select a project before editing candidates.");
+      const candidate = candidates.find((item) => item.id === id);
+      if (!candidate) throw new Error("The task candidate is no longer available.");
+      const response = await apiRequest<ApiCandidate>(
+        `/projects/${activeProjectId}/meetings/${candidate.meetingId}/candidates/${id}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify({
+            ...(patch.title !== undefined ? { title: patch.title } : {}),
+            ...(patch.description !== undefined ? { description: patch.description || null } : {}),
+            ...(patch.assigneeId !== undefined ? { suggestedAssigneeId: patch.assigneeId } : {}),
+            ...(patch.due !== undefined ? { suggestedDueDate: patch.due } : {}),
+            ...(patch.priority !== undefined ? { suggestedPriority: patch.priority } : {}),
+          }),
+        },
+      );
+      const updated = mapApiCandidate(response);
+      setCandidates((previous) =>
+        previous.map((current) => (current.id === id ? updated : current)),
+      );
+      return updated;
+    },
+    [activeProjectId, candidates],
+  );
 
   const approveCandidate = useCallback(
-    (id: string) => {
-      setCandidates((prev) => {
-        const c = prev.find((x) => x.id === id);
-        if (c && c.state !== "approved") {
-          setTasks((ts) => [
-            {
-              id: nid("t"),
-              projectId: activeProjectId ?? "atlas",
-              title: c.title,
-              description: "",
-              assigneeId: c.assigneeId,
-              due: c.due,
-              priority: c.priority,
-              status: "todo",
-              sourceMeetingId: c.meetingId,
-              sourceTimestamp: c.timestamp,
-              sourceQuote: c.quote,
-              activity: [
-                { id: nid("a"), text: "Task extracted from meeting", at: "Just now" },
-                { id: nid("a"), text: "Approved in review", at: "Just now" },
-              ],
-            },
-            ...ts,
-          ]);
-        }
-        return prev.map((x) => (x.id === id ? { ...x, state: "approved" } : x));
-      });
+    async (id: string) => {
+      if (!activeProjectId) throw new Error("Select a project before approving candidates.");
+      const candidate = candidates.find((item) => item.id === id);
+      if (!candidate) throw new Error("The task candidate is no longer available.");
+      const response = await apiRequest<{ candidate: ApiCandidate; task: ApiTask }>(
+        `/projects/${activeProjectId}/meetings/${candidate.meetingId}/candidates/${id}/approve`,
+        { method: "POST" },
+      );
+      const approved = mapApiCandidate(response.candidate);
+      const task = mapApiTask(response.task, activeProject?.kanbanColumns ?? [], projectMembers);
+      task.activity = [
+        { id: nid("a"), text: "Task extracted from meeting", at: "Just now" },
+        { id: nid("a"), text: "Approved in review", at: "Just now" },
+      ];
+      setCandidates((previous) =>
+        previous.map((current) => (current.id === id ? approved : current)),
+      );
+      setTasks((previous) => [task, ...previous.filter((current) => current.id !== task.id)]);
     },
-    [activeProjectId],
+    [activeProject?.kanbanColumns, activeProjectId, candidates, projectMembers],
+  );
+
+  const rejectCandidate = useCallback(
+    async (id: string) => {
+      if (!activeProjectId) throw new Error("Select a project before rejecting candidates.");
+      const candidate = candidates.find((item) => item.id === id);
+      if (!candidate) throw new Error("The task candidate is no longer available.");
+      const response = await apiRequest<ApiCandidate>(
+        `/projects/${activeProjectId}/meetings/${candidate.meetingId}/candidates/${id}/reject`,
+        { method: "POST" },
+      );
+      const rejected = mapApiCandidate(response);
+      setCandidates((previous) =>
+        previous.map((current) => (current.id === id ? rejected : current)),
+      );
+    },
+    [activeProjectId, candidates],
+  );
+
+  const bulkApproveCandidates = useCallback(
+    async (ids: string[]) => {
+      if (!activeProjectId) throw new Error("Select a project before approving candidates.");
+      const grouped = groupCandidatesByMeeting(candidates, ids);
+      const responses = await Promise.all(
+        [...grouped.entries()].map(([meetingId, group]) =>
+          apiRequest<{ candidates: ApiCandidate[]; tasks: ApiTask[] }>(
+            `/projects/${activeProjectId}/meetings/${meetingId}/candidates/bulk-approve`,
+            {
+              method: "POST",
+              body: JSON.stringify({ candidateIds: group.map((candidate) => candidate.id) }),
+            },
+          ),
+        ),
+      );
+      const approved = responses.flatMap((response) => response.candidates).map(mapApiCandidate);
+      const approvedById = new Map(approved.map((candidate) => [candidate.id, candidate]));
+      const createdTasks = responses
+        .flatMap((response) => response.tasks)
+        .map((task) => mapApiTask(task, activeProject?.kanbanColumns ?? [], projectMembers));
+      setCandidates((previous) =>
+        previous.map((candidate) => approvedById.get(candidate.id) ?? candidate),
+      );
+      setTasks((previous) => [
+        ...createdTasks,
+        ...previous.filter((task) => !createdTasks.some((created) => created.id === task.id)),
+      ]);
+    },
+    [activeProject?.kanbanColumns, activeProjectId, candidates, projectMembers],
+  );
+
+  const bulkRejectCandidates = useCallback(
+    async (ids: string[]) => {
+      if (!activeProjectId) throw new Error("Select a project before rejecting candidates.");
+      const grouped = groupCandidatesByMeeting(candidates, ids);
+      const responses = await Promise.all(
+        [...grouped.entries()].map(([meetingId, group]) =>
+          apiRequest<ApiCandidate[]>(
+            `/projects/${activeProjectId}/meetings/${meetingId}/candidates/bulk-reject`,
+            {
+              method: "POST",
+              body: JSON.stringify({ candidateIds: group.map((candidate) => candidate.id) }),
+            },
+          ),
+        ),
+      );
+      const rejected = responses.flat().map(mapApiCandidate);
+      const rejectedById = new Map(rejected.map((candidate) => [candidate.id, candidate]));
+      setCandidates((previous) =>
+        previous.map((candidate) => rejectedById.get(candidate.id) ?? candidate),
+      );
+    },
+    [activeProjectId, candidates],
   );
 
   const resolveDuplicate = useCallback(
@@ -570,7 +787,11 @@ export function RelayProvider({ children }: { children: ReactNode }) {
           { due: c.due },
           `Deadline updated from a later meeting to ${c.due}`,
         );
-        setCandidateState(id, "approved");
+        setCandidates((previous) =>
+          previous.map((candidate) =>
+            candidate.id === id ? { ...candidate, state: "approved" } : candidate,
+          ),
+        );
       } else if (action === "separate") {
         setCandidates((prev) =>
           prev.map((x) => {
@@ -580,10 +801,10 @@ export function RelayProvider({ children }: { children: ReactNode }) {
           }),
         );
       } else {
-        setCandidateState(id, "rejected");
+        void rejectCandidate(id);
       }
     },
-    [candidates, setCandidateState, updateTask],
+    [candidates, rejectCandidate, updateTask],
   );
 
   const createProject = useCallback(async (name: string, description: string) => {
@@ -726,6 +947,8 @@ export function RelayProvider({ children }: { children: ReactNode }) {
       meetingsLoading,
       meetingsError,
       candidates,
+      candidatesLoading,
+      candidatesError,
       notifications,
       addTask,
       updateTask,
@@ -733,12 +956,16 @@ export function RelayProvider({ children }: { children: ReactNode }) {
       deleteTask,
       loadTaskActivity,
       createTranscriptMeeting,
+      createAudioMeeting,
       loadMeeting,
       loadMeetingTranscript,
       loadMeetingTasks,
       reprocessMeeting,
-      setCandidateState,
+      updateCandidate,
       approveCandidate,
+      rejectCandidate,
+      bulkApproveCandidates,
+      bulkRejectCandidates,
       resolveDuplicate,
       markAllRead,
       toggleRead,
@@ -758,6 +985,8 @@ export function RelayProvider({ children }: { children: ReactNode }) {
       meetingsLoading,
       meetingsError,
       candidates,
+      candidatesLoading,
+      candidatesError,
       notifications,
       addTask,
       updateTask,
@@ -765,12 +994,16 @@ export function RelayProvider({ children }: { children: ReactNode }) {
       deleteTask,
       loadTaskActivity,
       createTranscriptMeeting,
+      createAudioMeeting,
       loadMeeting,
       loadMeetingTranscript,
       loadMeetingTasks,
       reprocessMeeting,
-      setCandidateState,
+      updateCandidate,
       approveCandidate,
+      rejectCandidate,
+      bulkApproveCandidates,
+      bulkRejectCandidates,
       resolveDuplicate,
       createProject,
       createKanbanColumn,
