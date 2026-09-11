@@ -4,11 +4,11 @@ import { Copy, ListChecks, Loader2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
+  AssigneeAvatarGroup,
   EmptyState,
   PageHeader,
   PriorityBadge,
   StatusPill,
-  UserAvatar,
 } from "@/components/relay/primitives";
 import { TaskDetailPanel } from "@/components/relay/task-detail-panel";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ export const Route = createFileRoute("/app/meetings/$meetingId")({
   validateSearch: z.object({ t: z.string().optional() }),
   head: () => ({
     meta: [
-      { title: "Meeting transcript | Relay" },
+      { title: "Relay" },
       { name: "description", content: "Parsed transcript segments and linked project tasks." },
     ],
   }),
@@ -164,6 +164,22 @@ function MeetingDetail() {
             {meeting.errorMessage}
           </p>
         ) : null}
+        {meeting.status === "ready_for_review" ? (
+          <div className="mb-5 flex max-w-3xl flex-wrap items-center gap-3 rounded-xl border border-destructive/35 bg-destructive/8 p-4">
+            <span className="flex size-9 items-center justify-center rounded-full bg-destructive/15 text-destructive">
+              <ListChecks className="size-[18px]" />
+            </span>
+            <div className="min-w-0 flex-1">
+              <p className="text-[13.5px] font-semibold">Extracted tasks are ready for review</p>
+              <p className="text-[12.5px] text-muted-foreground">
+                Approve, edit, or reject them before they are added to the board.
+              </p>
+            </div>
+            <Button size="sm" onClick={() => navigate({ to: "/app/review" })}>
+              Review tasks
+            </Button>
+          </div>
+        ) : null}
         <Tabs defaultValue="transcript">
           <TabsList>
             <TabsTrigger value="transcript">Transcript ({segments.length})</TabsTrigger>
@@ -248,7 +264,15 @@ function MeetingDetail() {
                       className="flex w-full flex-wrap items-center gap-3 px-4 py-3 text-left hover:bg-secondary/60"
                     >
                       <span className="min-w-0 flex-1 text-[13.5px] font-medium">{task.title}</span>
-                      {task.assigneeId ? <UserAvatar memberId={task.assigneeId} size={20} /> : null}
+                      {(task.assigneeIds?.length ?? (task.assigneeId ? 1 : 0)) > 0 ? (
+                        <AssigneeAvatarGroup
+                          memberIds={task.assigneeIds ?? (task.assigneeId ? [task.assigneeId] : [])}
+                          memberNames={
+                            task.assigneeNames ?? (task.assigneeName ? [task.assigneeName] : [])
+                          }
+                          size={20}
+                        />
+                      ) : null}
                       <span className="text-[13px] text-muted-foreground">
                         {task.due ? formatDate(task.due) : "No due date"}
                       </span>

@@ -29,7 +29,9 @@ export function initializeSocketServer(httpServer: HttpServer): SocketServer {
     if (!token) return next(new Error("UNAUTHORIZED"));
 
     try {
-      socket.data.userId = verifyAccessToken(token).sub;
+      const payload = verifyAccessToken(token);
+      socket.data.userId = payload.sub;
+      socket.data.tokenExpiresAt = payload.exp ? payload.exp * 1_000 : Date.now();
       next();
     } catch {
       next(new Error("UNAUTHORIZED"));
@@ -38,6 +40,12 @@ export function initializeSocketServer(httpServer: HttpServer): SocketServer {
 
   io.on("connection", (socket) => {
     logger.debug({ socketId: socket.id }, "Socket connected");
+    // Every authenticated socket gets a private room for user-owned events.
+    void socket.join(`user:${socket.data.userId}`);
+    const expiryTimer = setTimeout(
+      () => socket.disconnect(true),
+      Math.max(0, Math.min(socket.data.tokenExpiresAt - Date.now(), 2_147_483_647)),
+    );
 
     /** Allows an authenticated client to join a project room for scoped events. */
     socket.on("project:join", async (projectId: string) => {
@@ -72,6 +80,7 @@ export function initializeSocketServer(httpServer: HttpServer): SocketServer {
     });
 
     socket.on("disconnect", () => {
+      clearTimeout(expiryTimer);
       logger.debug({ socketId: socket.id }, "Socket disconnected");
     });
   });
@@ -83,4 +92,24 @@ export function initializeSocketServer(httpServer: HttpServer): SocketServer {
 /** Returns the live Socket.IO instance, or undefined before server startup. */
 export function getSocketServer(): SocketServer | undefined {
   return io;
+}
+
+/** Removes one user's live access to a project and all meetings in that project. */
+export async function revokeProjectSocketAccess(projectId: string, userId: string): Promise<void> {
+  if (!io) return;
+  const meetings = await Meeting.find({ projectId }).select({ _id: 1 }).lean();
+  const sockets = await io.in(`user:${userId}`).fetchSockets();
+  await Promise.all(
+    sockets.map(async (socket) => {
+      await socket.leave(`project:${projectId}`);
+      await Promise.all(meetings.map((meeting) => socket.leave(`meeting:${meeting._id.toString()}`)));
+    }),
+  );
+}
+
+/** Disconnects every live socket owned by a deleted account. */
+export async function disconnectUserSockets(userId: string): Promise<void> {
+  if (!io) return;
+  const sockets = await io.in(`user:${userId}`).fetchSockets();
+  await Promise.all(sockets.map(async (socket) => socket.disconnect(true)));
 }

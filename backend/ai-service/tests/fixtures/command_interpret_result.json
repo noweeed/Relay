@@ -1,0 +1,19 @@
+{
+  "jobId": "fixture-command-job-1",
+  "jobType": "command.interpret",
+  "schemaVersion": 1,
+  "projectId": "64f000000000000000000001",
+  "resourceId": "64f000000000000000000003",
+  "status": "succeeded",
+  "completedAt": "2026-09-04T12:00:01.000Z",
+  "payload": {
+    "commandId": "64f000000000000000000003",
+    "status": "resolved",
+    "intent": "update_task_status",
+    "taskId": "64f000000000000000000004",
+    "targetColumnId": "done-column",
+    "requiresConfirmation": true,
+    "preview": "Move “Finalize authentication flow” to Done?",
+    "candidateMatches": []
+  }
+}

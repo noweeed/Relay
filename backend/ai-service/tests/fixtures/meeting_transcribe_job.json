@@ -1,0 +1,21 @@
+{
+  "jobId": "fixture-audio-job-1",
+  "jobType": "meeting.transcribe",
+  "schemaVersion": 1,
+  "projectId": "fixture-project-1",
+  "initiatingUserId": "fixture-user-1",
+  "resourceId": "fixture-audio-meeting-1",
+  "correlationId": "fixture-audio-meeting-1",
+  "createdAt": "2026-09-03T00:00:00Z",
+  "payload": {
+    "meetingId": "fixture-audio-meeting-1",
+    "title": "Recorded planning",
+    "meetingDate": "2026-09-03",
+    "projectMembers": [],
+    "audio": {
+      "downloadUrl": "http://localhost:5000/api/media/audio/00000000-0000-4000-8000-000000000001.wav?expires=9999999999&signature=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "mimeType": "audio/wav",
+      "originalName": "planning.wav"
+    }
+  }
+}

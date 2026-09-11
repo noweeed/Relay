@@ -1,0 +1,25 @@
+{
+  "jobId": "fixture-command-job-1",
+  "jobType": "command.interpret",
+  "schemaVersion": 1,
+  "projectId": "64f000000000000000000001",
+  "initiatingUserId": "64f000000000000000000002",
+  "resourceId": "64f000000000000000000003",
+  "createdAt": "2026-09-04T12:00:00.000Z",
+  "payload": {
+    "commandId": "64f000000000000000000003",
+    "text": "Move authentication to done",
+    "tasks": [
+      {
+        "id": "64f000000000000000000004",
+        "title": "Finalize authentication flow",
+        "columnId": "todo-column"
+      }
+    ],
+    "columns": [
+      { "id": "todo-column", "name": "Todo", "category": "todo" },
+      { "id": "done-column", "name": "Done", "category": "done" }
+    ],
+    "members": []
+  }
+}

@@ -25,6 +25,9 @@ export const openApiDocument: OpenAPIV3.Document = {
       name: "Meetings",
       description: "Meeting transcripts and processing pipeline",
     },
+    { name: "Review", description: "Human review and duplicate resolution" },
+    { name: "Notifications", description: "Private deadline notifications" },
+    { name: "Commands", description: "Natural-language project commands" },
   ],
   components: {
     securitySchemes: {
@@ -140,10 +143,11 @@ export const openApiDocument: OpenAPIV3.Document = {
         properties: {
           title: { type: "string", minLength: 2, maxLength: 200 },
           description: { type: "string", maxLength: 5_000, nullable: true },
-          assigneeId: {
-            type: "string",
-            pattern: "^[a-fA-F0-9]{24}$",
-            nullable: true,
+          assigneeIds: {
+            type: "array",
+            maxItems: 20,
+            uniqueItems: true,
+            items: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
           },
           dueDate: { type: "string", format: "date-time", nullable: true },
           priority: {
@@ -160,14 +164,22 @@ export const openApiDocument: OpenAPIV3.Document = {
         properties: {
           title: { type: "string", minLength: 2, maxLength: 200 },
           description: { type: "string", maxLength: 5_000, nullable: true },
-          assigneeId: {
-            type: "string",
-            pattern: "^[a-fA-F0-9]{24}$",
-            nullable: true,
+          assigneeIds: {
+            type: "array",
+            maxItems: 20,
+            uniqueItems: true,
+            items: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
           },
           dueDate: { type: "string", format: "date-time", nullable: true },
           priority: { type: "string", enum: ["low", "medium", "high"] },
           columnId: { type: "string", format: "uuid" },
+        },
+      },
+      TaskCommentInput: {
+        type: "object",
+        required: ["body"],
+        properties: {
+          body: { type: "string", minLength: 1, maxLength: 2_000 },
         },
       },
       Error: {
@@ -213,6 +225,37 @@ export const openApiDocument: OpenAPIV3.Document = {
           },
         },
       },
+      CandidateUpdateInput: {
+        type: "object",
+        minProperties: 1,
+        properties: {
+          title: { type: "string", minLength: 2, maxLength: 200 },
+          description: { type: "string", maxLength: 5_000, nullable: true },
+          suggestedAssigneeId: { type: "string", pattern: "^[a-fA-F0-9]{24}$", nullable: true },
+          suggestedDueDate: { type: "string", format: "date-time", nullable: true },
+          suggestedPriority: { type: "string", enum: ["low", "medium", "high"] },
+        },
+      },
+      CandidateBulkInput: {
+        type: "object",
+        required: ["candidateIds"],
+        properties: {
+          candidateIds: {
+            type: "array",
+            minItems: 1,
+            maxItems: 100,
+            uniqueItems: true,
+            items: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
+          },
+        },
+      },
+      DuplicateResolutionInput: {
+        type: "object",
+        required: ["action"],
+        properties: {
+          action: { type: "string", enum: ["update_existing", "create_separate", "ignore"] },
+        },
+      },
     },
     parameters: {
       ProjectId: {
@@ -241,6 +284,18 @@ export const openApiDocument: OpenAPIV3.Document = {
       },
       MeetingId: {
         name: "meetingId",
+        in: "path",
+        required: true,
+        schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
+      },
+      CandidateId: {
+        name: "candidateId",
+        in: "path",
+        required: true,
+        schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
+      },
+      DuplicateId: {
+        name: "duplicateId",
         in: "path",
         required: true,
         schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
@@ -382,6 +437,46 @@ export const openApiDocument: OpenAPIV3.Document = {
         responses: { "200": { description: "Preferences updated" } },
       },
     },
+    "/api/notifications": {
+      get: {
+        tags: ["Notifications"],
+        summary: "List the current user's notifications",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          { name: "projectId", in: "query", schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
+          { name: "unreadOnly", in: "query", schema: { type: "boolean" } },
+          { name: "limit", in: "query", schema: { type: "integer", minimum: 1, maximum: 100 } },
+        ],
+        responses: { "200": { description: "Owned notifications, newest first" } },
+      },
+    },
+    "/api/notifications/{notificationId}/read": {
+      patch: {
+        tags: ["Notifications"],
+        summary: "Mark an owned notification read or unread",
+        security: [{ bearerAuth: [] }],
+        parameters: [
+          {
+            name: "notificationId",
+            in: "path",
+            required: true,
+            schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
+          },
+        ],
+        responses: {
+          "200": { description: "Notification updated" },
+          "404": { description: "Notification not found for this user" },
+        },
+      },
+    },
+    "/api/notifications/read-all": {
+      post: {
+        tags: ["Notifications"],
+        summary: "Mark all owned notifications read",
+        security: [{ bearerAuth: [] }],
+        responses: { "200": { description: "Unread notifications updated" } },
+      },
+    },
     "/api/projects": {
       get: {
         tags: ["Projects"],
@@ -402,6 +497,56 @@ export const openApiDocument: OpenAPIV3.Document = {
           },
         },
         responses: { "201": { description: "Project created" } },
+      },
+    },
+    "/api/projects/{projectId}/commands": {
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }],
+      post: {
+        tags: ["Commands"],
+        summary: "Interpret a project-scoped natural-language command",
+        security: [{ bearerAuth: [] }],
+        responses: { "202": { description: "Command queued for interpretation" } },
+      },
+    },
+    "/api/projects/{projectId}/commands/{commandId}": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        {
+          name: "commandId",
+          in: "path",
+          required: true,
+          schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" },
+        },
+      ],
+      get: {
+        tags: ["Commands"],
+        summary: "Get an owned command and its interpretation state",
+        security: [{ bearerAuth: [] }],
+        responses: { "200": { description: "Command state" } },
+      },
+    },
+    "/api/projects/{projectId}/commands/{commandId}/confirm": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        { name: "commandId", in: "path", required: true, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
+      ],
+      post: {
+        tags: ["Commands"],
+        summary: "Confirm and execute a previewed command",
+        security: [{ bearerAuth: [] }],
+        responses: { "200": { description: "Command executed" }, "409": { description: "Not awaiting confirmation" } },
+      },
+    },
+    "/api/projects/{projectId}/commands/{commandId}/cancel": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        { name: "commandId", in: "path", required: true, schema: { type: "string", pattern: "^[a-fA-F0-9]{24}$" } },
+      ],
+      post: {
+        tags: ["Commands"],
+        summary: "Cancel a command before execution",
+        security: [{ bearerAuth: [] }],
+        responses: { "200": { description: "Command cancelled" }, "409": { description: "Cannot be cancelled" } },
       },
     },
     "/api/projects/{projectId}": {
@@ -699,7 +844,7 @@ export const openApiDocument: OpenAPIV3.Document = {
       },
       patch: {
         tags: ["Tasks"],
-        summary: "Update a task and record relevant activity",
+        summary: "Update a task as owner, admin, or assignee and record field activity",
         security: [{ bearerAuth: [] }],
         requestBody: {
           required: true,
@@ -712,6 +857,7 @@ export const openApiDocument: OpenAPIV3.Document = {
         responses: {
           "200": { description: "Task updated" },
           "400": { description: "Invalid task or assignee" },
+          "403": { description: "Owner, admin, or task assignee required" },
         },
       },
       delete: {
@@ -736,6 +882,33 @@ export const openApiDocument: OpenAPIV3.Document = {
         responses: {
           "200": { description: "Chronological task activity" },
           "404": { description: "Task not found in this project" },
+        },
+      },
+    },
+    "/api/projects/{projectId}/tasks/{taskId}/comments": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        { $ref: "#/components/parameters/TaskId" },
+      ],
+      get: {
+        tags: ["Tasks"],
+        summary: "List task comments",
+        security: [{ bearerAuth: [] }],
+        responses: { "200": { description: "Chronological task comments" } },
+      },
+      post: {
+        tags: ["Tasks"],
+        summary: "Comment as owner, admin, or task assignee",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: {
+            "application/json": { schema: { $ref: "#/components/schemas/TaskCommentInput" } },
+          },
+        },
+        responses: {
+          "201": { description: "Comment created" },
+          "403": { description: "Owner, admin, or task assignee required" },
         },
       },
     },
@@ -907,6 +1080,142 @@ export const openApiDocument: OpenAPIV3.Document = {
           "200": { description: "Meeting reset to created" },
           "409": { description: "Meeting is not in failed status" },
         },
+      },
+    },
+    "/api/projects/{projectId}/meetings/transcript": {
+      parameters: [{ $ref: "#/components/parameters/ProjectId" }],
+      post: {
+        tags: ["Meetings"],
+        summary: "Create a transcript meeting using the explicit alias",
+        security: [{ bearerAuth: [] }],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { $ref: "#/components/schemas/MeetingInput" } } },
+        },
+        responses: { "201": { description: "Meeting created and extraction queued" }, "429": { description: "AI request limit reached" } },
+      },
+    },
+    "/api/projects/{projectId}/meetings/{meetingId}/candidates": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        { $ref: "#/components/parameters/MeetingId" },
+      ],
+      get: {
+        tags: ["Review"],
+        summary: "List review candidates for a meeting",
+        security: [{ bearerAuth: [] }],
+        parameters: [{ name: "status", in: "query", schema: { type: "string", enum: ["pending", "duplicate_pending", "approved", "rejected"] } }],
+        responses: { "200": { description: "Review candidates with safe duplicate metadata" } },
+      },
+    },
+    "/api/projects/{projectId}/meetings/{meetingId}/candidates/{candidateId}": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        { $ref: "#/components/parameters/MeetingId" },
+        { $ref: "#/components/parameters/CandidateId" },
+      ],
+      patch: {
+        tags: ["Review"],
+        summary: "Edit a pending review candidate",
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/CandidateUpdateInput" } } } },
+        responses: { "200": { description: "Candidate updated" }, "409": { description: "Candidate is not editable" } },
+      },
+      delete: {
+        tags: ["Review"],
+        summary: "Remove a handled candidate from review history",
+        security: [{ bearerAuth: [] }],
+        responses: { "200": { description: "Candidate removed" }, "409": { description: "Candidate still needs review" } },
+      },
+    },
+    "/api/projects/{projectId}/meetings/{meetingId}/candidates/{candidateId}/approve": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        { $ref: "#/components/parameters/MeetingId" },
+        { $ref: "#/components/parameters/CandidateId" },
+      ],
+      post: {
+        tags: ["Review"],
+        summary: "Approve a candidate and create a sourced task",
+        security: [{ bearerAuth: [] }],
+        responses: { "200": { description: "Candidate approved and task created" }, "409": { description: "Duplicate resolution or another review is required" } },
+      },
+    },
+    "/api/projects/{projectId}/meetings/{meetingId}/candidates/{candidateId}/reject": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        { $ref: "#/components/parameters/MeetingId" },
+        { $ref: "#/components/parameters/CandidateId" },
+      ],
+      post: {
+        tags: ["Review"],
+        summary: "Reject a pending candidate",
+        security: [{ bearerAuth: [] }],
+        responses: { "200": { description: "Candidate rejected" }, "409": { description: "Candidate cannot be rejected" } },
+      },
+    },
+    "/api/projects/{projectId}/meetings/{meetingId}/candidates/{candidateId}/restore": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        { $ref: "#/components/parameters/MeetingId" },
+        { $ref: "#/components/parameters/CandidateId" },
+      ],
+      post: {
+        tags: ["Review"],
+        summary: "Restore a rejected candidate to the review queue",
+        security: [{ bearerAuth: [] }],
+        responses: { "200": { description: "Candidate restored" }, "409": { description: "Candidate is not rejected" } },
+      },
+    },
+    "/api/projects/{projectId}/meetings/{meetingId}/candidates/bulk-approve": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        { $ref: "#/components/parameters/MeetingId" },
+      ],
+      post: {
+        tags: ["Review"],
+        summary: "Approve up to 100 candidates atomically",
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/CandidateBulkInput" } } } },
+        responses: { "200": { description: "Candidates approved and tasks created" } },
+      },
+    },
+    "/api/projects/{projectId}/meetings/{meetingId}/candidates/bulk-reject": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        { $ref: "#/components/parameters/MeetingId" },
+      ],
+      post: {
+        tags: ["Review"],
+        summary: "Reject up to 100 candidates atomically",
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/CandidateBulkInput" } } } },
+        responses: { "200": { description: "Candidates rejected" } },
+      },
+    },
+    "/api/projects/{projectId}/duplicates/{duplicateId}/resolve": {
+      parameters: [
+        { $ref: "#/components/parameters/ProjectId" },
+        { $ref: "#/components/parameters/DuplicateId" },
+      ],
+      post: {
+        tags: ["Review"],
+        summary: "Resolve a possible duplicate through an explicit human action",
+        security: [{ bearerAuth: [] }],
+        requestBody: { required: true, content: { "application/json": { schema: { $ref: "#/components/schemas/DuplicateResolutionInput" } } } },
+        responses: { "200": { description: "Duplicate resolved" }, "409": { description: "Duplicate was already resolved" } },
+      },
+    },
+    "/api/media/audio/{storageKey}": {
+      get: {
+        tags: ["Meetings"],
+        summary: "Read private audio through a short-lived signed worker URL",
+        parameters: [
+          { name: "storageKey", in: "path", required: true, schema: { type: "string" } },
+          { name: "expires", in: "query", required: true, schema: { type: "integer" } },
+          { name: "signature", in: "query", required: true, schema: { type: "string" } },
+        ],
+        responses: { "200": { description: "Audio bytes" }, "403": { description: "Expired or invalid signature" } },
       },
     },
   },

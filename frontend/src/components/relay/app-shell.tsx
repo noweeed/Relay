@@ -31,6 +31,7 @@ import { useAuth } from "@/lib/auth-store";
 import { useRelay, useTheme } from "@/lib/relay-store";
 import { CommandBar } from "./command-bar";
 import { NotificationPanel } from "./notification-panel";
+import { RelayBrand } from "./relay-brand";
 
 const nav = [
   { to: "/app", label: "Overview", icon: LayoutDashboard, exact: true },
@@ -104,6 +105,10 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const { user, logout } = useAuth();
+  const { candidates } = useRelay();
+  const pendingReviewCount = candidates.filter(
+    (candidate) => candidate.state === "pending" || candidate.state === "duplicate_pending",
+  ).length;
 
   /** Revokes the backend refresh session before returning to the sign-in screen. */
   async function signOut() {
@@ -113,11 +118,8 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="flex h-full flex-col gap-6 border-r border-border bg-sidebar px-3 py-4">
       <div className="space-y-3">
-        <Link to="/" className="flex items-center gap-2 px-1.5">
-          <span className="flex size-6 items-center justify-center rounded-md bg-primary text-[13px] font-bold text-primary-foreground">
-            R
-          </span>
-          <span className="text-[15px] font-semibold tracking-tight">Relay</span>
+        <Link to="/" className="px-1.5">
+          <RelayBrand />
         </Link>
         <ProjectSwitcher />
       </div>
@@ -125,6 +127,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
       <nav className="flex-1 space-y-0.5" aria-label="Main">
         {nav.map((item) => {
           const active = item.exact ? pathname === item.to : pathname.startsWith(item.to);
+          const reviewNeedsAttention = item.to === "/app/review" && pendingReviewCount > 0;
           return (
             <Link
               key={item.to}
@@ -134,14 +137,27 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
                 "relative flex items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] transition-colors duration-150",
                 active
                   ? "bg-primary-soft font-medium text-foreground"
-                  : "text-muted-foreground hover:bg-secondary hover:text-foreground",
+                  : reviewNeedsAttention
+                    ? "bg-destructive/10 font-medium text-destructive hover:bg-destructive/15"
+                    : "text-muted-foreground hover:bg-secondary hover:text-foreground",
               )}
             >
               {active ? (
                 <span className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary" />
               ) : null}
-              <item.icon className={cn("size-[17px]", active && "text-primary")} />
+              <item.icon
+                className={cn(
+                  "size-[17px]",
+                  active && "text-primary",
+                  reviewNeedsAttention && !active && "text-destructive",
+                )}
+              />
               {item.label}
+              {reviewNeedsAttention ? (
+                <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-destructive px-1.5 py-0.5 text-[10px] font-semibold leading-none text-destructive-foreground">
+                  {pendingReviewCount > 99 ? "99+" : pendingReviewCount}
+                </span>
+              ) : null}
             </Link>
           );
         })}

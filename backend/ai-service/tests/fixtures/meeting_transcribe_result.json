@@ -1,0 +1,30 @@
+{
+  "jobId": "fixture-audio-job-1",
+  "jobType": "meeting.transcribe",
+  "schemaVersion": 1,
+  "projectId": "fixture-project-1",
+  "resourceId": "fixture-audio-meeting-1",
+  "correlationId": "fixture-audio-meeting-1",
+  "status": "succeeded",
+  "completedAt": "2026-09-03T00:01:00Z",
+  "payload": {
+    "meetingId": "fixture-audio-meeting-1",
+    "transcript": [
+      {
+        "order": 0,
+        "speaker": "Speaker 1",
+        "text": "I will finish the audio pipeline.",
+        "startMs": 250,
+        "endMs": 2800
+      }
+    ],
+    "tasks": [
+      {
+        "title": "Finish the audio pipeline",
+        "priority": "medium",
+        "segmentOrder": 0,
+        "sourceQuote": "I will finish the audio pipeline."
+      }
+    ]
+  }
+}

@@ -3,21 +3,25 @@ import { env } from "../config/env";
 import { logger } from "../config/logger";
 import { Membership } from "../models/Membership.model";
 import type { MeetingDocument } from "../models/Meeting.model";
+import { Project } from "../models/Project.model";
 import { TranscriptSegment } from "../models/TranscriptSegment.model";
 import { User } from "../models/User.model";
 import { emitMeetingProgress } from "../sockets/meetingEvents";
 import { publishAiJob } from "./ai-transport.service";
 import { transitionMeetingStatus } from "./meeting-status.service";
+import { createSignedAudioUrl } from "./audio-storage.service";
 
-export type MeetingAiJobType = "meeting.process" | "meeting.reprocess";
+export type MeetingAiJobType = "meeting.process" | "meeting.reprocess" | "meeting.transcribe";
 
 /** Builds the complete, project-scoped context that the Python graph is allowed to see. */
 async function buildMeetingPayload(meeting: MeetingDocument): Promise<Record<string, unknown>> {
   const projectId = meeting.projectId.toString();
-  const [segments, memberships] = await Promise.all([
+  const [segments, memberships, project] = await Promise.all([
     TranscriptSegment.find({ projectId, meetingId: meeting._id }).sort({ index: 1 }),
-    Membership.find({ projectId }).select({ userId: 1 }).lean()
+    Membership.find({ projectId }).select({ userId: 1 }).lean(),
+    Project.findById(projectId, { kanbanColumns: 1 }).lean()
   ]);
+  if (!project) throw new Error("Meeting project was not found while building AI context.");
   const users = await User.find({ _id: { $in: memberships.map((member) => member.userId) } })
     .select({ name: 1 })
     .lean();
@@ -28,7 +32,7 @@ async function buildMeetingPayload(meeting: MeetingDocument): Promise<Record<str
     memberNameCounts.set(key, (memberNameCounts.get(key) ?? 0) + 1);
   }
 
-  return {
+  const shared = {
     meetingId: meeting._id.toString(),
     title: meeting.title,
     meetingDate: meeting.createdAt.toISOString().slice(0, 10),
@@ -39,6 +43,27 @@ async function buildMeetingPayload(meeting: MeetingDocument): Promise<Record<str
         userId: user._id.toString(),
         name: user.name
       })),
+    openTaskColumnIds: project.kanbanColumns
+      .filter((column) => column.category === "todo" || column.category === "in_progress")
+      .map((column) => column.id)
+  };
+
+  if (meeting.type === "audio") {
+    if (!meeting.audioStorageKey || !meeting.audioMimeType || !meeting.audioOriginalName) {
+      throw new Error("Audio meeting is missing its stored audio metadata.");
+    }
+    return {
+      ...shared,
+      audio: {
+        downloadUrl: await createSignedAudioUrl(meeting.audioStorageKey),
+        mimeType: meeting.audioMimeType,
+        originalName: meeting.audioOriginalName
+      }
+    };
+  }
+
+  return {
+    ...shared,
     segments: segments.map((segment) => ({
       segmentId: segment._id.toString(),
       order: segment.index,

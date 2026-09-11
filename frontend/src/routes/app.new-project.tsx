@@ -21,7 +21,7 @@ import { apiErrorMessage } from "@/lib/api-client";
 export const Route = createFileRoute("/app/new-project")({
   head: () => ({
     meta: [
-      { title: "Create a project | Relay" },
+      { title: "Relay" },
       {
         name: "description",
         content: "Projects keep meetings, tasks and team members in one workspace.",
@@ -37,7 +37,7 @@ export const Route = createFileRoute("/app/new-project")({
 });
 
 function NewProjectPage() {
-  const { createProject } = useRelay();
+  const { createProject, projects, projectsLoading } = useRelay();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -74,8 +74,18 @@ function NewProjectPage() {
       <div className="px-6 py-10 md:px-8">
         <EmptyState
           icon={FolderPlus}
-          title="Create your first project"
-          description="Projects keep meetings, tasks and team members organized in one workspace."
+          title={
+            projectsLoading
+              ? "Loading your projects..."
+              : projects.length
+                ? "Create another project"
+                : "Create your first project"
+          }
+          description={
+            projects.length
+              ? "Start a separate workspace with its own meetings, tasks and members."
+              : "Projects keep meetings, tasks and team members organized in one workspace."
+          }
           actions={<Button onClick={() => setOpen(true)}>Create project</Button>}
         />
       </div>

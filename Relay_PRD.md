@@ -3,11 +3,11 @@
 **Multi-Agent Meeting-to-Task Platform**  
 **Node Application Backend + Python AI Worker Specification**
 
-**Version:** 2.1  
-**Date:** August 24, 2026  
-**Frontend:** Built separately with Lovable  
-**Backend:** Node.js + Express + MongoDB Atlas  
-**AI Worker:** Python 3.12+ + LangGraph  
+**Version:** 3.0
+**Date:** September 5, 2026
+**Frontend:** React + TanStack Start
+**Backend:** Node.js + Express + MongoDB Atlas
+**AI Worker:** Python 3.12+ + LangGraph
 
 ---
 
@@ -19,13 +19,12 @@ The user-facing flow is:
 
 **Meeting → Transcription → Task Extraction → Human Review → Kanban Board → Cross-Meeting Tracking**
 
-The frontend will be generated and maintained separately in **Lovable**. This repository is therefore focused entirely on the **backend, database, APIs, Python AI worker, async processing, integrations, and business logic** required by that frontend.
+The repository includes a React/TanStack Start frontend plus the backend, database contracts, Python AI worker, async processing, and business logic it requires.
 
-The Node backend must expose a stable REST API so the Lovable frontend can remain mostly presentation-focused. Authentication, authorization, persistence, task approval, duplicate-resolution decisions, notifications, and command execution remain in Node. AI reasoning, provider calls, and multi-step agent orchestration run in a separate Python worker. The frontend never calls the Python worker directly.
+The Node backend exposes a stable REST API so the frontend remains presentation-focused. Authentication, authorization, persistence, task approval, duplicate-resolution decisions, notifications, and command execution remain in Node. AI reasoning, provider calls, and multi-step agent orchestration run in a separate Python worker. The frontend never calls the Python worker directly.
 
 ### Out of scope initially
 
-- Building the frontend UI
 - Billing/subscriptions
 - Enterprise SSO
 - Native mobile applications
@@ -70,14 +69,14 @@ The technology stack is intentionally fixed for this implementation.
 | Node async jobs | BullMQ |
 | Node/Python job transport | Redis Streams with consumer groups |
 | Queue backend | Redis |
-| File storage | Cloudinary or S3-compatible object storage |
+| File storage | S3-compatible object storage; local development fallback |
 | Realtime | Socket.IO |
 | AI runtime | Python 3.12+ |
 | AI orchestration | LangGraph |
 | Python validation | Pydantic |
-| LLM | Python provider abstraction; initially Gemini / Claude / OpenAI-compatible model |
-| Embeddings | Python provider abstraction; persisted by Node in MongoDB Atlas |
-| Speech-to-text | Python provider abstraction for a Whisper-compatible API |
+| LLM | Groq `qwen/qwen3.8-27b` behind a Python provider abstraction |
+| Embeddings | Gemini `gemini-embedding-001`; persisted by Node in MongoDB Atlas |
+| Speech-to-text | Groq `whisper-large-v3-turbo` behind a Python provider abstraction |
 | Logging | Pino |
 | AI logging | Python structured logging |
 | API docs | Swagger / OpenAPI |
@@ -109,7 +108,6 @@ It stores:
 - duplicate resolutions
 - notifications
 - command logs
-- integrations
 
 MongoDB Atlas Vector Search is also used for task embeddings and semantic similarity, removing the need to operate a separate vector database for the first version of Relay.
 
@@ -168,7 +166,6 @@ The backend owns:
 - deadline monitoring
 - notifications
 - command confirmation and execution
-- integrations
 - realtime events
 
 ### Python AI worker responsibility
@@ -575,7 +572,6 @@ GET  /api/auth/me
 - full project access
 - manage members
 - change project settings
-- connect integrations
 - delete project
 
 ### Admin
@@ -583,7 +579,6 @@ GET  /api/auth/me
 - manage meetings/tasks
 - review extracted tasks
 - manage project members
-- use integrations
 
 ### Member
 
@@ -1373,8 +1368,7 @@ relay/backend/
 |   |   |-- TaskActivity.model.ts
 |   |   |-- DuplicateCandidate.model.ts
 |   |   |-- Notification.model.ts
-|   |   |-- CommandLog.model.ts
-|   |   `-- Integration.model.ts
+|   |   `-- CommandLog.model.ts
 |   |
 |   |-- routes/
 |   |   |-- index.ts
@@ -1385,8 +1379,7 @@ relay/backend/
 |   |   |-- candidate.routes.ts
 |   |   |-- duplicate.routes.ts
 |   |   |-- command.routes.ts
-|   |   |-- notification.routes.ts
-|   |   `-- integration.routes.ts
+|   |   `-- notification.routes.ts
 |   |
 |   |-- controllers/
 |   |   |-- auth.controller.ts
@@ -1396,8 +1389,7 @@ relay/backend/
 |   |   |-- candidate.controller.ts
 |   |   |-- duplicate.controller.ts
 |   |   |-- command.controller.ts
-|   |   |-- notification.controller.ts
-|   |   `-- integration.controller.ts
+|   |   `-- notification.controller.ts
 |   |
 |   |-- services/
 |   |   |-- auth.service.ts
@@ -1408,8 +1400,7 @@ relay/backend/
 |   |   |-- duplicate.service.ts
 |   |   |-- notification.service.ts
 |   |   |-- command.service.ts
-|   |   |-- storage.service.ts
-|   |   `-- integration.service.ts
+|   |   `-- storage.service.ts
 |   |
 |   |-- jobs/
 |   |   |-- queues.ts
@@ -1592,8 +1583,8 @@ AI_WORKER_CONSUMER_GROUP=relay-ai-workers
 GROQ_API_KEY=
 GROQ_MODEL=qwen/qwen3.8-27b
 
-EMBEDDING_PROVIDER=
-EMBEDDING_API_KEY=
+GEMINI_API_KEY=
+GEMINI_EMBEDDING_MODEL=gemini-embedding-001
 
 TRANSCRIPTION_PROVIDER=
 TRANSCRIPTION_API_KEY=
@@ -1604,7 +1595,6 @@ CLOUDINARY_API_SECRET=
 
 FRONTEND_URL=
 
-TELEGRAM_BOT_TOKEN=
 ```
 
 Node and Python may load separate environment files in local development, but shared names and contracts must remain consistent. If Python receives a MongoDB URI for read-only context/vector search, use credentials restricted to the required collections and operations.
@@ -1852,19 +1842,6 @@ Relay finds the matching task, shows the intended action, waits for confirmation
 
 ---
 
-## v0.11 — Integrations
-
-### Build
-
-- Telegram integration
-- connect/disconnect
-- Telegram notifications
-- integration settings
-
-This version is optional for the initial portfolio demo.
-
----
-
 ## v1.0 — Portfolio Release
 
 ### Required before calling Relay v1
@@ -2026,9 +2003,9 @@ Application services call Relay interfaces, not Gemini/OpenAI/Claude SDKs direct
 
 Lovable is the current frontend implementation, but the backend API must not depend on Lovable-specific runtime behavior.
 
-### Rule 7 — Ship the core workflow before integrations
+### Rule 7 — Ship the core workflow first
 
-Do not delay the main meeting → extraction → review → board → cross-meeting update flow for Telegram or secondary features.
+Do not delay the main meeting → extraction → review → board → cross-meeting update flow for secondary features.
 
 ### Rule 8 — Node owns application state
 
@@ -2062,8 +2039,7 @@ Build in this exact order unless a blocking technical issue forces a change:
 11. Cross-meeting task update flow
 12. Notifications/deadline monitoring
 13. Python command graph + Node confirmation execution
-14. Telegram
-15. Hardening + tests
+14. Hardening + tests
 ```
 
 The first milestone worth showing publicly is **v0.5**.

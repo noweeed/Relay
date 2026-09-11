@@ -4,7 +4,9 @@ import { z } from "zod";
 export const aiJobTypeSchema = z.enum([
   "meeting.process",
   "meeting.reprocess",
-  "command.interpret"
+  "meeting.transcribe",
+  "command.interpret",
+  "content.embed"
 ]);
 
 /** Validates every job before Node publishes it to the AI transport. */
@@ -60,13 +62,77 @@ export const meetingExtractedTaskSchema = z.strictObject({
   priority: z.enum(["low", "medium", "high"]),
   segmentOrder: z.number().int().nonnegative(),
   sourceQuote: z.string().trim().min(1).max(2_000),
-  confidence: z.number().min(0).max(1).nullable().optional()
+  confidence: z.number().min(0).max(1).nullable().optional(),
+  embedding: z.array(z.number().finite()).min(1).max(8_192).optional(),
+  duplicate: z
+    .strictObject({
+      existingTaskId: z.string().regex(/^[a-f\d]{24}$/i),
+      similarityLabel: z.enum(["medium", "high"]),
+      similarityScore: z.number().min(0).max(1),
+      verification: z.enum(["same_work", "related_but_separate", "unrelated"]).optional()
+    })
+    .nullable()
+    .optional()
 });
 
 /** Validates the successful payload before AI output is persisted in MongoDB. */
 export const meetingExtractionResultSchema = z.strictObject({
   meetingId: z.string().min(1),
+  transcript: z.array(z.strictObject({
+    order: z.number().int().nonnegative(),
+    speaker: z.string().trim().min(1).max(100).nullable().optional(),
+    text: z.string().trim().min(1).max(500_000),
+    startMs: z.number().int().nonnegative(),
+    endMs: z.number().int().nonnegative()
+  })).optional(),
   tasks: z.array(meetingExtractedTaskSchema)
 });
 
 export type MeetingExtractionResult = z.infer<typeof meetingExtractionResultSchema>;
+
+export const commandTaskContextSchema = z.strictObject({
+  id: z.string().regex(/^[a-f\d]{24}$/i),
+  title: z.string().trim().min(1).max(200),
+  columnId: z.string().min(1),
+  assigneeId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
+});
+
+export const commandInterpretPayloadSchema = z.strictObject({
+  commandId: z.string().regex(/^[a-f\d]{24}$/i),
+  text: z.string().trim().min(1).max(1_000),
+  tasks: z.array(commandTaskContextSchema).max(1_000),
+  columns: z.array(z.strictObject({
+    id: z.string().min(1),
+    name: z.string().trim().min(1).max(40),
+    category: z.enum(["todo", "in_progress", "done"]),
+  })).min(1).max(20),
+  members: z.array(z.strictObject({
+    id: z.string().regex(/^[a-f\d]{24}$/i),
+    name: z.string().trim().min(1).max(80),
+  })).max(1_000),
+});
+
+export const commandInterpretResultSchema = z.strictObject({
+  commandId: z.string().regex(/^[a-f\d]{24}$/i),
+  status: z.enum(["resolved", "ambiguous", "unsupported"]),
+  intent: z.enum(["list_overdue_tasks", "update_task_status", "assign_task", "unknown"]),
+  taskId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
+  targetColumnId: z.string().min(1).optional(),
+  targetAssigneeId: z.string().regex(/^[a-f\d]{24}$/i).optional(),
+  requiresConfirmation: z.boolean(),
+  preview: z.string().trim().min(1).max(1_000),
+  candidateMatches: z.array(z.strictObject({
+    id: z.string().regex(/^[a-f\d]{24}$/i),
+    label: z.string().trim().min(1).max(200),
+  })).max(20),
+});
+
+export type CommandInterpretPayload = z.infer<typeof commandInterpretPayloadSchema>;
+export type CommandInterpretResult = z.infer<typeof commandInterpretResultSchema>;
+
+export const contentEmbeddingResultSchema = z.strictObject({
+  resourceId: z.string().regex(/^[a-f\d]{24}$/i),
+  resourceKind: z.enum(["task", "candidate"]),
+  contentHash: z.string().regex(/^[a-f\d]{64}$/i),
+  embedding: z.array(z.number().finite()).min(1).max(8_192),
+});

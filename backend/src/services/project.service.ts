@@ -1,7 +1,10 @@
 import mongoose, { Types } from "mongoose";
 import { Membership, type ProjectRole } from "../models/Membership.model";
 import { Meeting } from "../models/Meeting.model";
+import { CommandLog } from "../models/CommandLog.model";
+import { Notification } from "../models/Notification.model";
 import { AiJobLedger } from "../models/AiJobLedger.model";
+import { DuplicateCandidate } from "../models/DuplicateCandidate.model";
 import {
   Project,
   type KanbanColumn,
@@ -9,10 +12,14 @@ import {
 } from "../models/Project.model";
 import { Task } from "../models/Task.model";
 import { TaskActivity } from "../models/TaskActivity.model";
+import { TaskComment } from "../models/TaskComment.model";
 import { TaskCandidate } from "../models/TaskCandidate.model";
 import { TranscriptSegment } from "../models/TranscriptSegment.model";
 import { User } from "../models/User.model";
 import { ApiError } from "../utils/ApiError";
+import { logger } from "../config/logger";
+import { revokeProjectSocketAccess } from "../sockets/io";
+import { deleteAudio } from "./audio-storage.service";
 import type {
   CreateProjectInput,
   InviteProjectMemberInput,
@@ -150,14 +157,21 @@ export async function updateProject(
 
 /** Deletes a project and all current dependent records atomically. */
 export async function deleteProject(projectId: string): Promise<void> {
+  const audioMeetings = await Meeting.find({ projectId, type: "audio" })
+    .select("+audioStorageKey")
+    .lean();
   await mongoose.connection.transaction(async (session) => {
     const project = await Project.findByIdAndDelete(projectId, { session });
     if (!project)
       throw new ApiError(404, "NOT_FOUND", "Project was not found.");
     // Transaction operations stay sequential because MongoDB sessions do not support parallel writes.
+    await CommandLog.deleteMany({ projectId }, { session });
     await Membership.deleteMany({ projectId }, { session });
+    await Notification.deleteMany({ projectId }, { session });
     await Task.deleteMany({ projectId }, { session });
     await TaskActivity.deleteMany({ projectId }, { session });
+    await TaskComment.deleteMany({ projectId }, { session });
+    await DuplicateCandidate.deleteMany({ projectId }, { session });
     await TaskCandidate.deleteMany({ projectId }, { session });
     await TranscriptSegment.deleteMany({ projectId }, { session });
     await Meeting.deleteMany({ projectId }, { session });
@@ -165,6 +179,18 @@ export async function deleteProject(projectId: string): Promise<void> {
   // This collection may not exist until the first AI result; creating it inside a
   // transaction makes MongoDB retry forever on a brand-new installation.
   await AiJobLedger.deleteMany({ projectId });
+  const removals = await Promise.allSettled(
+    audioMeetings.flatMap((meeting) =>
+      meeting.audioStorageKey ? [deleteAudio(meeting.audioStorageKey)] : []
+    )
+  );
+  const failedRemovals = removals.filter((result) => result.status === "rejected");
+  if (failedRemovals.length > 0) {
+    logger.error(
+      { projectId, failedRemovals: failedRemovals.length },
+      "Project deleted but one or more audio objects could not be removed"
+    );
+  }
 }
 
 /** Joins memberships with public user fields without exposing password hashes. */
@@ -343,5 +369,14 @@ export async function removeProjectMember(
     );
   }
 
-  await Membership.deleteOne({ _id: new Types.ObjectId(membership._id) });
+  await mongoose.connection.transaction(async (session) => {
+    await Membership.deleteOne({ _id: new Types.ObjectId(membership._id) }, { session });
+    await Task.updateMany(
+      { projectId, $or: [{ assigneeIds: targetUserId }, { assigneeId: targetUserId }] },
+      { $pull: { assigneeIds: targetUserId }, $unset: { assigneeId: 1 } },
+      { session },
+    );
+    await Notification.deleteMany({ projectId, userId: targetUserId }, { session });
+  });
+  await revokeProjectSocketAccess(projectId, targetUserId);
 }

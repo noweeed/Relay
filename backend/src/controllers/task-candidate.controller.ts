@@ -4,6 +4,7 @@ import { ApiError } from "../utils/ApiError";
 import type {
   BulkCandidateActionInput,
   ListCandidatesQuery,
+  ResolveDuplicateInput,
   UpdateCandidateInput
 } from "../validators/task-candidate.validator";
 
@@ -14,12 +15,23 @@ function getContext(request: Request): { projectId: string; userId: string } {
   return { projectId: request.projectMembership.projectId, userId: request.user.id };
 }
 
-function getParam(request: Request, name: "meetingId" | "candidateId"): string {
+function getParam(request: Request, name: "meetingId" | "candidateId" | "duplicateId"): string {
   const value = request.params[name];
   if (typeof value !== "string") {
     throw new ApiError(400, "VALIDATION_ERROR", `A valid ${name} is required.`);
   }
   return value;
+}
+
+export async function resolveDuplicate(request: Request, response: Response): Promise<void> {
+  const { projectId, userId } = getContext(request);
+  const result = await candidateService.resolveDuplicate(
+    projectId,
+    getParam(request, "duplicateId"),
+    userId,
+    (request.body as ResolveDuplicateInput).action
+  );
+  response.json({ success: true, data: result });
 }
 
 export async function listCandidates(request: Request, response: Response): Promise<void> {
@@ -33,11 +45,12 @@ export async function listCandidates(request: Request, response: Response): Prom
 }
 
 export async function updateCandidate(request: Request, response: Response): Promise<void> {
-  const { projectId } = getContext(request);
+  const { projectId, userId } = getContext(request);
   const candidate = await candidateService.updateCandidate(
     projectId,
     getParam(request, "meetingId"),
     getParam(request, "candidateId"),
+    userId,
     request.body as UpdateCandidateInput
   );
   response.json({ success: true, data: candidate });
@@ -62,6 +75,26 @@ export async function rejectCandidate(request: Request, response: Response): Pro
     getParam(request, "candidateId")
   );
   response.json({ success: true, data: candidate });
+}
+
+export async function restoreCandidate(request: Request, response: Response): Promise<void> {
+  const { projectId } = getContext(request);
+  const candidate = await candidateService.restoreCandidate(
+    projectId,
+    getParam(request, "meetingId"),
+    getParam(request, "candidateId")
+  );
+  response.json({ success: true, data: candidate });
+}
+
+export async function deleteCandidate(request: Request, response: Response): Promise<void> {
+  const { projectId } = getContext(request);
+  const result = await candidateService.deleteCandidate(
+    projectId,
+    getParam(request, "meetingId"),
+    getParam(request, "candidateId")
+  );
+  response.json({ success: true, data: result });
 }
 
 export async function bulkApproveCandidates(request: Request, response: Response): Promise<void> {

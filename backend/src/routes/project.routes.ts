@@ -1,5 +1,6 @@
 import { Router } from "express";
 import * as kanbanController from "../controllers/kanban.controller";
+import * as commandController from "../controllers/command.controller";
 import * as meetingController from "../controllers/meeting.controller";
 import * as overviewController from "../controllers/overview.controller";
 import * as projectController from "../controllers/project.controller";
@@ -7,12 +8,17 @@ import * as taskController from "../controllers/task.controller";
 import * as taskCandidateController from "../controllers/task-candidate.controller";
 import { authenticate } from "../middleware/auth.middleware";
 import { parseAudioUpload } from "../middleware/audio-upload.middleware";
+import { expensiveAiRateLimit } from "../middleware/rate-limit.middleware";
 import {
   requireProjectMembership,
   requireProjectRole,
 } from "../middleware/project-access.middleware";
 import { validateRequest } from "../middleware/validate.middleware";
 import { asyncHandler } from "../utils/asyncHandler";
+import {
+  commandParamsSchema,
+  createCommandSchema,
+} from "../validators/command.validator";
 import {
   createKanbanColumnSchema,
   deleteKanbanColumnQuerySchema,
@@ -41,11 +47,14 @@ import {
   bulkCandidateActionSchema,
   candidateCollectionParamsSchema,
   candidateParamsSchema,
+  duplicateParamsSchema,
   listCandidatesQuerySchema,
+  resolveDuplicateSchema,
   updateCandidateSchema,
 } from "../validators/task-candidate.validator";
 import {
   createTaskSchema,
+  createTaskCommentSchema,
   listTasksQuerySchema,
   taskParamsSchema,
   updateTaskSchema,
@@ -156,11 +165,25 @@ projectRouter.get(
   requireProjectMembership,
   asyncHandler(taskController.listTaskActivity),
 );
+projectRouter.get(
+  "/:projectId/tasks/:taskId/comments",
+  validateRequest({ params: taskParamsSchema }),
+  requireProjectMembership,
+  asyncHandler(taskController.listTaskComments),
+);
+projectRouter.post(
+  "/:projectId/tasks/:taskId/comments",
+  validateRequest({ params: taskParamsSchema, body: createTaskCommentSchema }),
+  requireProjectMembership,
+  asyncHandler(taskController.createTaskComment),
+);
 
 projectRouter.post(
   "/:projectId/meetings/audio",
   validateRequest({ params: projectParamsSchema }),
   requireProjectMembership,
+  requireProjectRole("owner", "admin"),
+  expensiveAiRateLimit,
   parseAudioUpload,
   validateRequest({ body: createAudioMeetingSchema }),
   asyncHandler(meetingController.createAudioMeeting),
@@ -169,12 +192,16 @@ projectRouter.post(
   "/:projectId/meetings/transcript",
   validateRequest({ params: projectParamsSchema, body: createMeetingSchema }),
   requireProjectMembership,
+  requireProjectRole("owner", "admin"),
+  expensiveAiRateLimit,
   asyncHandler(meetingController.createMeeting),
 );
 projectRouter.post(
   "/:projectId/meetings",
   validateRequest({ params: projectParamsSchema, body: createMeetingSchema }),
   requireProjectMembership,
+  requireProjectRole("owner", "admin"),
+  expensiveAiRateLimit,
   asyncHandler(meetingController.createMeeting),
 );
 projectRouter.get(
@@ -225,6 +252,7 @@ projectRouter.post(
   validateRequest({ params: meetingParamsSchema }),
   requireProjectMembership,
   requireProjectRole("owner", "admin"),
+  expensiveAiRateLimit,
   asyncHandler(meetingController.requestReprocess),
 );
 projectRouter.get(
@@ -252,6 +280,18 @@ projectRouter.post(
   asyncHandler(taskCandidateController.rejectCandidate),
 );
 projectRouter.post(
+  "/:projectId/meetings/:meetingId/candidates/:candidateId/restore",
+  validateRequest({ params: candidateParamsSchema }),
+  requireProjectMembership,
+  asyncHandler(taskCandidateController.restoreCandidate),
+);
+projectRouter.delete(
+  "/:projectId/meetings/:meetingId/candidates/:candidateId",
+  validateRequest({ params: candidateParamsSchema }),
+  requireProjectMembership,
+  asyncHandler(taskCandidateController.deleteCandidate),
+);
+projectRouter.post(
   "/:projectId/meetings/:meetingId/candidates/bulk-approve",
   validateRequest({ params: candidateCollectionParamsSchema, body: bulkCandidateActionSchema }),
   requireProjectMembership,
@@ -263,12 +303,44 @@ projectRouter.post(
   requireProjectMembership,
   asyncHandler(taskCandidateController.bulkRejectCandidates),
 );
+projectRouter.post(
+  "/:projectId/duplicates/:duplicateId/resolve",
+  validateRequest({ params: duplicateParamsSchema, body: resolveDuplicateSchema }),
+  requireProjectMembership,
+  asyncHandler(taskCandidateController.resolveDuplicate),
+);
 
 projectRouter.get(
   "/:projectId/overview",
   validateRequest({ params: projectParamsSchema }),
   requireProjectMembership,
   asyncHandler(overviewController.getProjectOverview),
+);
+
+projectRouter.post(
+  "/:projectId/commands",
+  validateRequest({ params: projectParamsSchema, body: createCommandSchema }),
+  requireProjectMembership,
+  expensiveAiRateLimit,
+  asyncHandler(commandController.createCommand),
+);
+projectRouter.get(
+  "/:projectId/commands/:commandId",
+  validateRequest({ params: commandParamsSchema }),
+  requireProjectMembership,
+  asyncHandler(commandController.getCommand),
+);
+projectRouter.post(
+  "/:projectId/commands/:commandId/confirm",
+  validateRequest({ params: commandParamsSchema }),
+  requireProjectMembership,
+  asyncHandler(commandController.confirmCommand),
+);
+projectRouter.post(
+  "/:projectId/commands/:commandId/cancel",
+  validateRequest({ params: commandParamsSchema }),
+  requireProjectMembership,
+  asyncHandler(commandController.cancelCommand),
 );
 
 projectRouter.get(

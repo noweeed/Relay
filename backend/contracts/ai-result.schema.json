@@ -16,7 +16,7 @@
     "jobId": { "type": "string", "minLength": 1 },
     "jobType": {
       "type": "string",
-      "enum": ["meeting.process", "meeting.reprocess", "command.interpret"]
+      "enum": ["meeting.process", "meeting.reprocess", "meeting.transcribe", "command.interpret", "content.embed"]
     },
     "schemaVersion": { "const": 1 },
     "projectId": { "type": "string", "minLength": 1 },

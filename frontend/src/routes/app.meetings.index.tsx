@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/app/meetings/")({
   head: () => ({
     meta: [
-      { title: "Meetings | Relay" },
+      { title: "Relay" },
       { name: "description", content: "Saved project transcripts and their processing state." },
     ],
   }),
@@ -35,10 +35,11 @@ function meetingStatusLabel(status: string): string {
 
 /** Displays project-scoped meeting metadata loaded from the API. */
 function MeetingsPage() {
-  const { meetings, meetingsLoading, meetingsError, tasks, members } = useRelay();
+  const { activeProject, meetings, meetingsLoading, meetingsError, tasks, members } = useRelay();
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<(typeof filters)[number]>("All");
+  const canAddMeeting = activeProject?.role === "owner" || activeProject?.role === "admin";
 
   const rows = meetings.filter((meeting) => {
     const matchesQuery = meeting.title.toLowerCase().includes(query.toLowerCase());
@@ -54,11 +55,13 @@ function MeetingsPage() {
     <>
       <PageHeader
         title="Meetings"
-        description="Transcripts saved in the selected project. AI extraction is not running yet."
+        description="Transcripts and extracted tasks for the selected project."
         actions={
-          <Button onClick={() => navigate({ to: "/app/upload" })}>
-            <Upload className="size-4" /> Add transcript
-          </Button>
+          canAddMeeting ? (
+            <Button onClick={() => navigate({ to: "/app/upload" })}>
+              <Upload className="size-4" /> Add transcript
+            </Button>
+          ) : undefined
         }
       />
 
@@ -110,7 +113,7 @@ function MeetingsPage() {
                 : "Try a different search or status filter."
             }
             actions={
-              meetings.length === 0 ? (
+              meetings.length === 0 && canAddMeeting ? (
                 <Button size="sm" onClick={() => navigate({ to: "/app/upload" })}>
                   Add transcript
                 </Button>
@@ -173,7 +176,8 @@ function MeetingsPage() {
                       <td className="px-4 py-3 text-[13px] text-muted-foreground">
                         {creator ? (
                           <span className="flex items-center gap-2">
-                            <UserAvatar memberId={creator.id} size={22} /> {creator.name}
+                            <UserAvatar memberId={creator.id} memberName={creator.name} size={22} />{" "}
+                            {creator.name}
                           </span>
                         ) : (
                           "Project member"

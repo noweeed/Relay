@@ -14,13 +14,17 @@
     "test:watch": "vitest",
     "ai:check": "node scripts/check-ai.mjs",
     "migrate:kanban-columns": "tsx scripts/migrate-kanban-columns.ts",
+    "backfill:task-embeddings": "tsx scripts/backfill-task-embeddings.ts",
     "seed": "tsx scripts/seed.ts"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1125.0",
+    "@aws-sdk/s3-request-presigner": "^3.1125.0",
     "bcrypt": "^6.0.0",
+    "bullmq": "^5.81.4",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",

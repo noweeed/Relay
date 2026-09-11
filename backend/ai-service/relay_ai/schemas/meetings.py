@@ -52,6 +52,9 @@ class MeetingProcessPayload(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     meeting_date: date = Field(alias="meetingDate")
     project_members: list[ProjectMemberInput] = Field(alias="projectMembers", default_factory=list)
+    open_task_column_ids: list[str] = Field(
+        alias="openTaskColumnIds", default_factory=list
+    )
     segments: list[TranscriptSegmentInput] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -73,6 +76,62 @@ class MeetingProcessPayload(BaseModel):
         return self
 
 
+class AudioInput(BaseModel):
+    """One short-lived, Node-authorized audio object for transcription."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    download_url: str = Field(alias="downloadUrl", min_length=1)
+    mime_type: str = Field(alias="mimeType", min_length=1, max_length=100)
+    original_name: str = Field(alias="originalName", min_length=1, max_length=255)
+
+
+class AudioMeetingPayload(BaseModel):
+    """Typed payload carried by a `meeting.transcribe` job."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    meeting_id: str = Field(alias="meetingId", min_length=1)
+    title: str = Field(min_length=2, max_length=200)
+    meeting_date: date = Field(alias="meetingDate")
+    project_members: list[ProjectMemberInput] = Field(alias="projectMembers", default_factory=list)
+    open_task_column_ids: list[str] = Field(
+        alias="openTaskColumnIds", default_factory=list
+    )
+    audio: AudioInput
+
+
+class TranscribedSegment(BaseModel):
+    """Provider-neutral transcript text with millisecond evidence timestamps."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    order: int = Field(ge=0)
+    speaker: str | None = Field(default=None, max_length=100)
+    text: str = Field(min_length=1, max_length=500_000)
+    start_ms: int = Field(alias="startMs", ge=0)
+    end_ms: int = Field(alias="endMs", ge=0)
+
+    @model_validator(mode="after")
+    def validate_timestamps(self) -> "TranscribedSegment":
+        if self.end_ms < self.start_ms:
+            raise ValueError("endMs must be greater than or equal to startMs")
+        return self
+
+
+class DuplicateProposal(BaseModel):
+    """One internal semantic match proposed for Node-side revalidation."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    existing_task_id: str = Field(alias="existingTaskId", min_length=1)
+    similarity_label: str = Field(alias="similarityLabel", pattern="^(medium|high)$")
+    similarity_score: float = Field(alias="similarityScore", ge=0, le=1)
+    verification: str | None = Field(
+        default=None, pattern="^(same_work|related_but_separate|unrelated)$"
+    )
+
+
 class ExtractedTask(BaseModel):
     """One evidence-backed task proposal returned by the extraction graph."""
 
@@ -86,6 +145,8 @@ class ExtractedTask(BaseModel):
     segment_order: int = Field(alias="segmentOrder", ge=0)
     source_quote: str = Field(alias="sourceQuote", min_length=1, max_length=2_000)
     confidence: float | None = Field(default=None, ge=0, le=1)
+    embedding: list[float] | None = Field(default=None, min_length=1, max_length=8_192)
+    duplicate: DuplicateProposal | None = None
 
 
 class MeetingExtractionResult(BaseModel):
@@ -94,4 +155,5 @@ class MeetingExtractionResult(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
     meeting_id: str = Field(alias="meetingId", min_length=1)
+    transcript: list[TranscribedSegment] | None = None
     tasks: list[ExtractedTask] = Field(default_factory=list)

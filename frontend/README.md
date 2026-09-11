@@ -385,8 +385,6 @@ Email
 
 Password
 
-Confirm password
-
 Create account
 
 Include proper:
@@ -1015,24 +1013,6 @@ Meeting processing completed
 
 Tasks requiring review
 
-Telegram
-
-Status:
-
-Not connected
-
-CTA:
-
-Connect Telegram
-
-After connection:
-
-Connected
-
-Provide:
-
-Disconnect
-
 Every toggle must actually change state in the prototype.
 
 24. Empty States
@@ -1506,7 +1486,7 @@ completed tasks
 
 successful saves
 
-connected integrations
+positive status indicators
 
 Warning / Upcoming Deadline
 

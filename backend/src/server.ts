@@ -4,11 +4,19 @@ import { connectDatabase, disconnectDatabase } from "./config/database";
 import { disconnectRedis } from "./config/redis";
 import { env } from "./config/env";
 import { logger } from "./config/logger";
+import {
+  closeDeadlineMonitorQueue,
+  scheduleDeadlineMonitor,
+} from "./jobs/deadline-monitor.job";
 import { initializeSocketServer } from "./sockets/io";
 import {
   startAiResultConsumer,
   stopAiResultConsumer
 } from "./services/ai-result-consumer.service";
+import {
+  startNotificationWorker,
+  stopNotificationWorker,
+} from "./workers/notification.worker";
 
 /** Connects required infrastructure, starts HTTP traffic, and installs graceful shutdown hooks. */
 async function startServer(): Promise<void> {
@@ -17,6 +25,8 @@ async function startServer(): Promise<void> {
   const server = createServer(createApp());
   initializeSocketServer(server);
   startAiResultConsumer();
+  startNotificationWorker();
+  await scheduleDeadlineMonitor();
 
   server.listen(env.PORT, () => {
     logger.info({ port: env.PORT }, "Relay API is listening");
@@ -27,6 +37,7 @@ async function startServer(): Promise<void> {
     logger.info({ signal }, "Graceful shutdown started");
     server.close(() => {
       void stopAiResultConsumer()
+        .then(() => Promise.all([stopNotificationWorker(), closeDeadlineMonitorQueue()]))
         .then(() => Promise.all([disconnectDatabase(), disconnectRedis()]))
         .then(() => process.exit(0))
         .catch((error: unknown) => {

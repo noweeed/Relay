@@ -1,0 +1,29 @@
+{
+  "project": {
+    "name": "Relay Portfolio Demo",
+    "description": "Two meetings that demonstrate reviewed task creation and a human-confirmed cross-meeting update."
+  },
+  "meetings": [
+    {
+      "title": "Sprint planning — first meeting",
+      "transcript": "Naveed: I will finish the authentication backend by September 10.\nMaya: I will write the API launch checklist by September 12.",
+      "review": [
+        { "candidateTitle": "Finish authentication backend", "action": "approve" },
+        { "candidateTitle": "Write API launch checklist", "action": "approve" }
+      ]
+    },
+    {
+      "title": "Sprint follow-up — second meeting",
+      "transcript": "Naveed: Move the authentication backend deadline to September 15 and raise its priority to high.",
+      "review": [
+        { "candidateTitle": "Finish authentication backend", "action": "update_existing" }
+      ]
+    }
+  ],
+  "expectedOutcome": {
+    "taskTitle": "Finish authentication backend",
+    "dueDate": "2026-09-15",
+    "priority": "high",
+    "sourceHistory": ["first meeting approval", "second meeting duplicate resolution"]
+  }
+}

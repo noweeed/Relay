@@ -18,6 +18,10 @@ const environmentSchema = z.object({
   PORT: z.coerce.number().int().positive().max(65_535).default(5_000),
   MONGODB_URI: z.string().trim().min(1, "MONGODB_URI is required"),
   FRONTEND_URL: z.url().default("http://localhost:3000"),
+  TRUST_PROXY: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .default(false),
   LOG_LEVEL: z
     .enum(["fatal", "error", "warn", "info", "debug", "trace", "silent"])
     .default("info"),
@@ -35,9 +39,19 @@ const environmentSchema = z.object({
     .max(365)
     .default(30),
   BCRYPT_ROUNDS: z.coerce.number().int().min(10).max(15).default(12),
+  AUTH_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1_000).default(900_000),
+  AUTH_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
+  AI_ROUTE_RATE_LIMIT_WINDOW_MS: z.coerce.number().int().min(1_000).default(900_000),
+  AI_ROUTE_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(20),
   REFRESH_COOKIE_NAME: z.string().trim().min(1).default("relay_refresh_token"),
   GOOGLE_CLIENT_ID: z.string().trim().min(1).optional(),
   REDIS_URL: optionalUrl,
+  DEADLINE_MONITOR_ENABLED: z
+    .enum(["true", "false"])
+    .transform((value) => value === "true")
+    .default(true),
+  DEADLINE_MONITOR_INTERVAL_MS: z.coerce.number().int().min(60_000).default(3_600_000),
+  DEADLINE_UPCOMING_HOURS: z.coerce.number().int().min(1).max(168).default(24),
   AI_JOB_STREAM: z.string().trim().min(1).default("relay:ai:jobs"),
   AI_RESULT_STREAM: z.string().trim().min(1).default("relay:ai:results"),
   AI_DEAD_LETTER_STREAM: z.string().trim().min(1).default("relay:ai:dead-letter"),
@@ -49,8 +63,19 @@ const environmentSchema = z.object({
   AI_PENDING_IDLE_MS: z.coerce.number().int().positive().default(30_000),
   AI_CONSUMER_RETRY_BASE_MS: z.coerce.number().int().positive().default(500),
   AI_CONSUMER_RETRY_MAX_MS: z.coerce.number().int().positive().default(30_000),
+  DUPLICATE_MEDIUM_THRESHOLD: z.coerce.number().min(0).max(1).default(0.8),
+  DUPLICATE_HIGH_THRESHOLD: z.coerce.number().min(0).max(1).default(0.9),
   AUDIO_STORAGE_DIR: z.string().trim().min(1).default(".relay-data/audio"),
   AUDIO_MAX_BYTES: z.coerce.number().int().positive().max(500_000_000).default(25_000_000),
+  AUDIO_STORAGE_PROVIDER: z.enum(["local", "s3"]).default("local"),
+  API_PUBLIC_URL: z.url().default("http://localhost:5000"),
+  AUDIO_SIGNING_SECRET: optionalText,
+  S3_ENDPOINT: optionalUrl,
+  S3_REGION: z.string().trim().min(1).default("us-east-1"),
+  S3_BUCKET: optionalText,
+  S3_ACCESS_KEY_ID: optionalText,
+  S3_SECRET_ACCESS_KEY: optionalText,
+  S3_FORCE_PATH_STYLE: z.enum(["true", "false"]).transform((value) => value === "true").default(true),
   SEED_USER_PASSWORD: z.string().min(12).optional(),
 });
 

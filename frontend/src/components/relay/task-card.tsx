@@ -1,6 +1,6 @@
 import { Mic } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { formatDate, isOverdue, memberById, type Meeting, type Task } from "@/lib/relay-data";
+import { formatDate, isOverdue, type Meeting, type Task } from "@/lib/relay-data";
 import { AssigneeChip, PriorityBadge } from "./primitives";
 
 export function TaskCard({
@@ -16,7 +16,8 @@ export function TaskCard({
 }) {
   const source = meetings.find((m) => m.id === task.sourceMeetingId);
   const overdue = isOverdue(task);
-  void memberById;
+  const assigneeIds = task.assigneeIds ?? (task.assigneeId ? [task.assigneeId] : []);
+  const assigneeNames = task.assigneeNames ?? (task.assigneeName ? [task.assigneeName] : []);
 
   return (
     <button
@@ -28,10 +29,24 @@ export function TaskCard({
     >
       <p className="text-[13.5px] font-medium leading-snug">{task.title}</p>
       <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-        <AssigneeChip
-          memberId={task.assigneeId}
-          {...(task.assigneeName ? { memberName: task.assigneeName } : {})}
-        />
+        <span className="flex items-center gap-1">
+          {assigneeIds.length === 0 ? (
+            <AssigneeChip memberId={null} />
+          ) : (
+            assigneeIds
+              .slice(0, 2)
+              .map((memberId, index) => (
+                <AssigneeChip
+                  key={memberId}
+                  memberId={memberId}
+                  {...(assigneeNames[index] ? { memberName: assigneeNames[index] } : {})}
+                />
+              ))
+          )}
+          {assigneeIds.length > 2 ? (
+            <span className="text-[11px] text-subtle">+{assigneeIds.length - 2}</span>
+          ) : null}
+        </span>
         <span
           className={cn(
             "text-[12.5px]",

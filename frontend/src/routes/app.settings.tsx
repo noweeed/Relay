@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowRightLeft, Loader2, Pencil, Plus, Send, Trash2 } from "lucide-react";
+import { ArrowRightLeft, Loader2, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,7 +21,9 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { PageHeader, Tag, UserAvatar } from "@/components/relay/primitives";
+import { ColumnSettings } from "@/components/relay/column-settings";
 import { apiErrorMessage } from "@/lib/api-client";
+import { useAuth } from "@/lib/auth-store";
 import { type Member } from "@/lib/relay-data";
 import { useRelay } from "@/lib/relay-store";
 import { toast } from "sonner";
@@ -29,15 +31,15 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/app/settings")({
   head: () => ({
     meta: [
-      { title: "Project settings | Relay" },
+      { title: "Relay" },
       {
         name: "description",
-        content: "Rename the project, manage members, and connect Telegram for deadline reminders.",
+        content: "Rename the project and manage its members.",
       },
       { property: "og:title", content: "Project settings | Relay" },
       {
         property: "og:description",
-        content: "Manage your Relay project, its members and integrations.",
+        content: "Manage your Relay project and its members.",
       },
     ],
   }),
@@ -81,6 +83,7 @@ function InviteDialog({
   const { inviteProjectMember } = useRelay();
   const [email, setEmail] = useState("");
   const [teamRole, setTeamRole] = useState("");
+  const [accessRole, setAccessRole] = useState<"admin" | "member">("member");
   const [error, setError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
@@ -109,9 +112,10 @@ function InviteDialog({
             setError(null);
             setSending(true);
             try {
-              await inviteProjectMember(email.trim(), teamRole.trim());
+              await inviteProjectMember(email.trim(), teamRole.trim(), accessRole);
               setEmail("");
               setTeamRole("");
+              setAccessRole("member");
               onOpenChange(false);
               toast.success("Member added");
             } catch (requestError) {
@@ -132,6 +136,21 @@ function InviteDialog({
               placeholder="teammate@company.com"
               aria-invalid={!!error}
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Access</Label>
+            <Select
+              value={accessRole}
+              onValueChange={(value) => setAccessRole(value as "admin" | "member")}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="member">Member — use the project</SelectItem>
+                <SelectItem value="admin">Admin — also manage settings</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="invite-team-role">Team role</Label>
@@ -168,6 +187,58 @@ function InviteDialog({
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function RemoveMemberDialog({
+  member,
+  onOpenChange,
+}: {
+  member: Member | null;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { removeProjectMember } = useRelay();
+  const [removing, setRemoving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => setError(null), [member]);
+
+  async function remove() {
+    if (!member) return;
+    setRemoving(true);
+    setError(null);
+    try {
+      await removeProjectMember(member.id);
+      onOpenChange(false);
+      toast.success("Member removed");
+    } catch (requestError) {
+      setError(apiErrorMessage(requestError));
+    } finally {
+      setRemoving(false);
+    }
+  }
+
+  return (
+    <Dialog open={!!member} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Remove {member?.name}</DialogTitle>
+          <DialogDescription>
+            They will lose access to this project and will be unassigned from its tasks.
+          </DialogDescription>
+        </DialogHeader>
+        {error ? <p className="text-[12.5px] text-destructive">{error}</p> : null}
+        <DialogFooter>
+          <Button variant="outline" disabled={removing} onClick={() => onOpenChange(false)}>
+            Cancel
+          </Button>
+          <Button variant="destructive" disabled={removing} onClick={() => void remove()}>
+            {removing ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
+            Remove member
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -329,19 +400,28 @@ function TransferOwnershipDialog({
 
 /** Renders project configuration using real member data and membership actions. */
 function SettingsPage() {
-  const { activeProject, members } = useRelay();
+  const { activeProject, members, updateProject, deleteProject } = useRelay();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const [projectName, setProjectName] = useState(activeProject?.name ?? "");
   const [description, setDescription] = useState(activeProject?.description ?? "");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [telegram, setTelegram] = useState(false);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<Member | null>(null);
+  const [removingMember, setRemovingMember] = useState<Member | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [transferOpen, setTransferOpen] = useState(false);
   const [confirmName, setConfirmName] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const canManageMembers = activeProject?.role === "owner" || activeProject?.role === "admin";
+
+  useEffect(() => {
+    setProjectName(activeProject?.name ?? "");
+    setDescription(activeProject?.description ?? "");
+    setError(null);
+  }, [activeProject?.id, activeProject?.name, activeProject?.description]);
 
   async function save() {
     if (projectName.trim().length < 2) {
@@ -350,17 +430,34 @@ function SettingsPage() {
     }
     setError(null);
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 600));
-    setSaving(false);
-    toast.success("Project updated");
+    try {
+      await updateProject(projectName.trim(), description.trim());
+      toast.success("Project updated");
+    } catch (requestError) {
+      setError(apiErrorMessage(requestError));
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeProject() {
+    setDeleting(true);
+    setDeleteError(null);
+    try {
+      await deleteProject();
+      setDeleteOpen(false);
+      toast.success("Project deleted");
+      navigate({ to: "/app" });
+    } catch (requestError) {
+      setDeleteError(apiErrorMessage(requestError));
+    } finally {
+      setDeleting(false);
+    }
   }
 
   return (
     <>
-      <PageHeader
-        title="Project settings"
-        description="Details, members and integrations for this project."
-      />
+      <PageHeader title="Project settings" description="Details and members for this project." />
 
       <div className="mx-auto max-w-3xl space-y-8 px-6 py-6 md:px-8">
         <Section
@@ -377,6 +474,7 @@ function SettingsPage() {
                   maxLength={80}
                   onChange={(e) => setProjectName(e.target.value)}
                   aria-invalid={!!error}
+                  disabled={!canManageMembers}
                 />
                 {error ? <p className="text-[12.5px] text-destructive">{error}</p> : null}
               </div>
@@ -389,24 +487,31 @@ function SettingsPage() {
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
                   placeholder="What this team is working on."
+                  disabled={!canManageMembers}
                 />
               </div>
             </div>
-            <Button size="sm" className="mt-4" onClick={save} disabled={saving}>
-              {saving ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" /> Saving...
-                </>
-              ) : (
-                "Save changes"
-              )}
-            </Button>
+            {canManageMembers ? (
+              <Button size="sm" className="mt-4" onClick={() => void save()} disabled={saving}>
+                {saving ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" /> Saving...
+                  </>
+                ) : (
+                  "Save changes"
+                )}
+              </Button>
+            ) : (
+              <p className="mt-4 text-[12.5px] text-muted-foreground">
+                Only the owner or an admin can change project details.
+              </p>
+            )}
           </div>
         </Section>
 
         <Section
           title="Members"
-          description="Everyone here can review extracted tasks and edit the board."
+          description="Manage who can use this project and what access they have."
           action={
             canManageMembers ? (
               <Button size="sm" variant="outline" onClick={() => setInviteOpen(true)}>
@@ -418,7 +523,7 @@ function SettingsPage() {
           <ul className="divide-y divide-border rounded-xl border border-border bg-card">
             {members.map((m) => (
               <li key={m.id} className="flex items-center gap-3 px-4 py-3">
-                <UserAvatar memberId={m.id} size={28} />
+                <UserAvatar memberId={m.id} memberName={m.name} size={28} />
                 <span className="min-w-0 flex-1">
                   <span className="block text-[13.5px] font-medium">{m.name}</span>
                   <span className="meta-text">{m.email}</span>
@@ -428,42 +533,44 @@ function SettingsPage() {
                   <Tag tone="neutral">{m.accessRole ?? "member"}</Tag>
                 </span>
                 {canManageMembers ? (
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    aria-label={`Edit ${m.name}'s team role`}
-                    onClick={() => setEditingMember(m)}
-                  >
-                    <Pencil className="size-4" />
-                  </Button>
+                  <div className="grid w-[72px] shrink-0 grid-cols-2 items-center">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="size-9 text-muted-foreground"
+                      aria-label={`Edit ${m.name}'s team role`}
+                      onClick={() => setEditingMember(m)}
+                    >
+                      <Pencil className="size-4" />
+                    </Button>
+                    {(activeProject?.role === "owner" && m.accessRole !== "owner") ||
+                    (activeProject?.role === "admin" &&
+                      m.accessRole === "member" &&
+                      m.id !== user?.id) ? (
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="size-9 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                        aria-label={`Remove ${m.name}`}
+                        onClick={() => setRemovingMember(m)}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    ) : (
+                      <span className="size-9" aria-hidden="true" />
+                    )}
+                  </div>
                 ) : null}
               </li>
             ))}
           </ul>
         </Section>
 
-        <Section title="Integrations" description="Connect services used by this project's team.">
-          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-4 py-4">
-            <Send className="size-4 text-muted-foreground" />
-            <span className="min-w-0 flex-1">
-              <span className="block text-[13.5px] font-medium">Telegram</span>
-              <span className="meta-text">Send project deadline reminders to your team.</span>
-            </span>
-            {telegram ? (
-              <Tag tone="success">Connected</Tag>
-            ) : (
-              <Tag tone="neutral">Not connected</Tag>
-            )}
-            {telegram ? (
-              <Button size="sm" variant="outline" onClick={() => setTelegram(false)}>
-                Disconnect
-              </Button>
-            ) : (
-              <Button size="sm" onClick={() => setTelegram(true)}>
-                Connect Telegram
-              </Button>
-            )}
-          </div>
+        <Section
+          title="Board columns"
+          description="Set each stage's name, color, reporting group, and order."
+        >
+          <ColumnSettings canManage={canManageMembers} />
         </Section>
 
         {activeProject?.role === "owner" ? (
@@ -485,19 +592,21 @@ function SettingsPage() {
           </Section>
         ) : null}
 
-        <Section title="Danger zone">
-          <div className="flex flex-wrap items-center gap-4 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
-            <div className="min-w-0 flex-1">
-              <p className="text-[13.5px] font-medium">Delete project</p>
-              <p className="mt-1 text-[13px] text-muted-foreground">
-                Removes this project's meetings, transcripts and tasks for everyone.
-              </p>
+        {activeProject?.role === "owner" ? (
+          <Section title="Danger zone">
+            <div className="flex flex-wrap items-center gap-4 rounded-xl border border-destructive/40 bg-destructive/5 p-4">
+              <div className="min-w-0 flex-1">
+                <p className="text-[13.5px] font-medium">Delete project</p>
+                <p className="mt-1 text-[13px] text-muted-foreground">
+                  Removes this project's meetings, transcripts and tasks for everyone.
+                </p>
+              </div>
+              <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
+                <Trash2 className="size-4" /> Delete project
+              </Button>
             </div>
-            <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
-              <Trash2 className="size-4" /> Delete project
-            </Button>
-          </div>
-        </Section>
+          </Section>
+        ) : null}
       </div>
 
       <InviteDialog open={inviteOpen} onOpenChange={setInviteOpen} />
@@ -505,6 +614,12 @@ function SettingsPage() {
         member={editingMember}
         onOpenChange={(open) => {
           if (!open) setEditingMember(null);
+        }}
+      />
+      <RemoveMemberDialog
+        member={removingMember}
+        onOpenChange={(open) => {
+          if (!open) setRemovingMember(null);
         }}
       />
       <TransferOwnershipDialog
@@ -530,6 +645,7 @@ function SettingsPage() {
               value={confirmName}
               onChange={(e) => setConfirmName(e.target.value)}
             />
+            {deleteError ? <p className="text-[12.5px] text-destructive">{deleteError}</p> : null}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteOpen(false)}>
@@ -537,14 +653,11 @@ function SettingsPage() {
             </Button>
             <Button
               variant="destructive"
-              disabled={confirmName.trim() !== activeProject?.name}
-              onClick={() => {
-                setDeleteOpen(false);
-                toast.success("Project deleted");
-                navigate({ to: "/app/new-project" });
-              }}
+              disabled={confirmName.trim() !== activeProject?.name || deleting}
+              onClick={() => void removeProject()}
             >
-              Delete project
+              {deleting ? <Loader2 className="size-4 animate-spin" /> : null}
+              {deleting ? "Deleting…" : "Delete project"}
             </Button>
           </DialogFooter>
         </DialogContent>

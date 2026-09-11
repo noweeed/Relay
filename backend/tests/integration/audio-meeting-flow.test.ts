@@ -10,6 +10,7 @@ import { Meeting } from "../../src/models/Meeting.model";
 import { Project } from "../../src/models/Project.model";
 import { RefreshSession } from "../../src/models/RefreshSession.model";
 import { User } from "../../src/models/User.model";
+import { createSignedAudioUrl } from "../../src/services/audio-storage.service";
 
 const wav = Buffer.concat([
   Buffer.from("RIFF"),
@@ -73,6 +74,12 @@ describe("audio meeting upload flow", () => {
     });
     expect(upload.body.data.audioUrl).toContain(`/meetings/${upload.body.data.id}/audio`);
 
+    const storedMeeting = await Meeting.findById(upload.body.data.id).select("+audioStorageKey");
+    const workerUrl = new URL(await createSignedAudioUrl(storedMeeting!.audioStorageKey!));
+    await request(app).get(`${workerUrl.pathname}${workerUrl.search}`).expect(200);
+    workerUrl.searchParams.set("signature", "0".repeat(64));
+    await request(app).get(`${workerUrl.pathname}${workerUrl.search}`).expect(403);
+
     const audio = await owner
       .get(upload.body.data.audioUrl)
       .set("Authorization", `Bearer ${ownerToken}`)
@@ -85,6 +92,26 @@ describe("audio meeting upload flow", () => {
       .get(upload.body.data.audioUrl)
       .set("Authorization", `Bearer ${outsiderToken}`)
       .expect(403);
+
+    await owner
+      .patch(`/api/projects/${projectId}/meetings/${upload.body.data.id}/status`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ status: "processing" })
+      .expect(200);
+    await owner
+      .patch(`/api/projects/${projectId}/meetings/${upload.body.data.id}/status`)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .send({ status: "failed" })
+      .expect(200);
+    const retry = await owner
+      .post(`/api/projects/${projectId}/meetings/${upload.body.data.id}/reprocess`)
+      .set("Authorization", `Bearer ${ownerToken}`);
+    expect(retry.status).toBe(200);
+    expect(retry.body.data.status).toBe("created");
+    await owner
+      .get(upload.body.data.audioUrl)
+      .set("Authorization", `Bearer ${ownerToken}`)
+      .expect(200);
   });
 
   it("rejects spoofed and unsupported uploads", async () => {

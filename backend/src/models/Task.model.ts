@@ -18,6 +18,8 @@ export interface TaskDocument {
   projectId: Types.ObjectId;
   title: string;
   description?: string;
+  assigneeIds: Types.ObjectId[];
+  /** Legacy single-assignee field kept temporarily so old records can be read and migrated. */
   assigneeId?: Types.ObjectId;
   dueDate?: Date;
   priority: TaskPriority;
@@ -44,7 +46,15 @@ const taskSchema = new Schema<TaskDocument>(
     projectId: { type: Schema.Types.ObjectId, ref: "Project", required: true, index: true },
     title: { type: String, required: true, trim: true, minlength: 2, maxlength: 200 },
     description: { type: String, trim: true, maxlength: 5_000 },
-    assigneeId: { type: Schema.Types.ObjectId, ref: "User", index: true },
+    assigneeIds: {
+      type: [{ type: Schema.Types.ObjectId, ref: "User" }],
+      default: [],
+      validate: {
+        validator: (value: Types.ObjectId[]) => value.length <= 20,
+        message: "A task can have at most 20 assignees."
+      }
+    },
+    assigneeId: { type: Schema.Types.ObjectId, ref: "User" },
     dueDate: { type: Date, index: true },
     priority: { type: String, enum: TASK_PRIORITIES, required: true, default: "medium" },
     columnId: { type: String, required: true, index: true },
@@ -58,6 +68,6 @@ const taskSchema = new Schema<TaskDocument>(
 
 // These compound indexes support the common project board filters efficiently.
 taskSchema.index({ projectId: 1, columnId: 1, createdAt: -1 });
-taskSchema.index({ projectId: 1, assigneeId: 1, createdAt: -1 });
+taskSchema.index({ projectId: 1, assigneeIds: 1, createdAt: -1 });
 
 export const Task = model<TaskDocument>("Task", taskSchema);

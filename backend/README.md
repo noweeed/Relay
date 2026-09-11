@@ -62,7 +62,10 @@ npm run typecheck
 npm run lint
 npm test
 npm run migrate:kanban-columns
+npm run seed
 ```
+
+`npm run seed` creates the deterministic demo owner and project when `SEED_USER_PASSWORD` is set. The complete two-meeting portfolio script is in [`demo/portfolio-demo.json`](demo/portfolio-demo.json).
 
 Endpoints:
 
@@ -78,6 +81,8 @@ Current API groups:
 - `/api/projects/:projectId/tasks/*` — Kanban task CRUD, filtering, grouping, and activity history
 - `/api/projects/:projectId/kanban/columns/*` — owner/admin custom workflow configuration
 - `/api/projects/:projectId/meetings/*` — transcript and audio meetings, processing status, source transcript/audio, linked tasks, and reprocessing
+- `/api/notifications/*` — private notification listing and read state
+- `/api/projects/:projectId/commands/*` — interpreted queries and confirmed task mutations
 
 When MongoDB is connected, `/health` returns HTTP 200 and `database.status: connected`. It returns HTTP 503 when the API is alive but MongoDB is unavailable.
 
@@ -91,7 +96,21 @@ The v0.6 transport uses durable Redis consumer groups. Each API and worker proce
 
 Long transcripts are processed in bounded chunks by the Python worker. `TRANSCRIPT_CHUNK_MAX_CHARS`, `TRANSCRIPT_CHUNK_OVERLAP_SEGMENTS`, and `TRANSCRIPT_CHUNK_CONCURRENCY` tune context size, boundary overlap, and simultaneous provider calls. The defaults are `12000`, `1`, and `3`.
 
-The v0.7 upload foundation accepts one `audio` multipart field at `POST /api/projects/:projectId/meetings/audio`. MP3, WAV, and M4A uploads are bounded by `AUDIO_MAX_BYTES`, checked against both MIME type and container signature, and stored behind an opaque key in `AUDIO_STORAGE_DIR`. Audio is retrieved only through the project-authorized meeting endpoint; filesystem paths are never returned to clients. The local adapter is for development and tests while the hosted S3-compatible/Cloudinary adapter and Python transcription stage are still pending.
+The v0.7 audio path accepts one `audio` multipart field at `POST /api/projects/:projectId/meetings/audio`. MP3, WAV, and M4A uploads are bounded by `AUDIO_MAX_BYTES`, checked against both MIME type and container signature, and stored behind an opaque key. Set `AUDIO_STORAGE_PROVIDER=local` for development or `s3` for AWS S3, Cloudflare R2, MinIO, and similar services. Normal audio access requires project membership; Python receives a short-lived signed URL rather than a filesystem path. The worker transcribes with Groq Whisper, retains segment timestamps, extracts tasks through the existing meeting graph, and returns transcript plus candidates for one transactional Node-side persistence step.
+
+The v0.8 duplicate path embeds extracted tasks, runs read-only project-scoped Atlas Vector Search against open work, and stores medium/high matches as review suggestions. It never auto-merges. A project member must choose Update existing, Create separate, or Ignore before Node performs a transaction. Configure the index with [`config/atlas-vector-index.json`](config/atlas-vector-index.json); full setup is in [`docs/ATLAS_VECTOR_SEARCH.md`](docs/ATLAS_VECTOR_SEARCH.md).
+
+The v0.9 deadline path uses BullMQ in the Node process; Python does not decide deadline state or recipients. Set `DEADLINE_MONITOR_INTERVAL_MS` (default one hour) and `DEADLINE_UPCOMING_HOURS` (default 24). Assigned work notifies its assignee, unassigned work notifies its creator, Done-category tasks are ignored, and recipient preferences are enforced. `DEADLINE_MONITOR_ENABLED=false` disables both the repeat schedule and its worker.
+
+The v0.10 command path sends authorized project task, column, and member context to a Python LangGraph interpreter. Initial commands can move tasks, assign tasks, or list overdue work. Python only returns structured intent and previews: Node owns the command log, executes read-only queries, waits for confirmation, revalidates targets, performs mutations, and records task activity. The frontend command bar polls the command record and never mutates work before confirmation.
+
+## Production release
+
+- [`docs/PRODUCTION.md`](docs/PRODUCTION.md) lists required infrastructure, secrets, rate-limit settings, and release checks.
+- [`docs/RUNBOOK.md`](docs/RUNBOOK.md) covers process start order, worker recovery, provider outages, rotation, and rollback.
+- [`docs/SECURITY_PRIVACY.md`](docs/SECURITY_PRIVACY.md) records the v1.0 authorization, logging, audio, AI-review, and privacy controls.
+
+Swagger UI at `/docs` documents every public HTTP operation. Authentication routes default to 30 attempts per 15 minutes; costly AI routes default to 20 requests per authenticated user per 15 minutes. Both are configurable in `.env`.
 
 ## How the authentication code is organized
 

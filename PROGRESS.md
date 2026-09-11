@@ -1,8 +1,8 @@
 # Relay Development Progress
 
-**Last updated:** September 3, 2026
-**Current milestone:** v0.7 — Audio Meetings
-**Overall status:** v0.6 complete; background meeting processing is durable, retryable, idempotent, and live-updating
+**Last updated:** September 5, 2026
+**Current milestone:** v1.0 — Portfolio Release (code complete)
+**Overall status:** All repository-owned v1.0 work is complete and verified; Atlas Vector Search index deployment remains an external environment step
 
 This is the living implementation tracker. Update it when work begins, acceptance criteria change, or a milestone is completed.
 
@@ -48,12 +48,13 @@ This is the living implementation tracker. Update it when work begins, acceptanc
 | `npm run typecheck`         | Passed    |
 | `npm run lint`              | Passed    |
 | `npm run build`             | Passed    |
-| Node unit/integration tests | 34 passed |
-| Python unit/schema tests    | 23 passed |
+| Node unit/integration tests | 110 passed |
+| Python unit/schema tests    | 40 passed |
 | Ruff                        | Passed    |
 | mypy                        | Passed    |
 | Python worker `--check`     | Passed    |
 | Live Atlas connection       | Passed    |
+| Frontend lint/build         | Passed    |
 
 ## Immediate next actions
 
@@ -184,105 +185,95 @@ This is the living implementation tracker. Update it when work begins, acceptanc
 - [x] Multipart upload endpoint
 - [x] Audio MIME, container-signature, and size validation
 - [x] Filename sanitization
-- [ ] Cloudinary or S3-compatible storage adapter
+- [x] S3-compatible storage adapter with local development fallback
 - [x] Project-membership-secured audio access
-- [ ] Python transcription provider abstraction
-- [ ] Timestamped transcript segmentation
-- [ ] Speaker labels without biometric identity claims
-- [ ] Retry processing without re-upload
-- [ ] Audio pipeline integration tests
+- [x] Python transcription provider abstraction and Groq Whisper adapter
+- [x] Timestamped transcript segmentation
+- [x] No invented speaker identities; labels remain empty when the transcription provider cannot diarize
+- [x] Retry processing without re-upload
+- [x] Cross-runtime audio contract and pipeline integration tests
 
 **Acceptance demo:** Upload MP3/WAV/M4A → transcription → extraction → review.
 
 ### v0.8 — Duplicate Detection and Cross-Meeting Memory
 
-- [ ] Python embedding provider abstraction
-- [ ] Candidate and task embedding persistence
-- [ ] Atlas Vector Search index and setup guide
-- [ ] Project-scoped search over open tasks
-- [ ] Configurable similarity thresholds
+- [x] Python embedding provider abstraction
+- [x] Candidate and approved-task embedding persistence
+- [~] Atlas Vector Search index and setup guide (definition is ready; deployment needs Atlas access)
+- [x] Project-scoped search over open tasks
+- [x] Configurable similarity thresholds
 - [ ] Optional LLM duplicate verification
-- [ ] DuplicateCandidate model
-- [ ] Field-difference generation
-- [ ] Duplicate resolution endpoint
-- [ ] Update-existing action
-- [ ] Create-separate action
-- [ ] Ignore action
-- [ ] Human confirmation enforcement
-- [ ] Cross-meeting source activity
+- [x] DuplicateCandidate model
+- [x] Field-difference generation
+- [x] Duplicate resolution endpoint
+- [x] Update-existing action
+- [x] Create-separate action
+- [x] Ignore action
+- [x] Human confirmation enforcement
+- [x] Cross-meeting source activity
 
 **Acceptance demo:** A second meeting mentions existing work with changed details, and Relay proposes updating the existing task.
 
 ### v0.9 — Notifications and Deadline Monitoring
 
-- [ ] Notification model
-- [ ] Notification preferences
-- [ ] BullMQ deadline schedule
-- [ ] Upcoming deadline detection
-- [ ] Overdue detection
-- [ ] Notification deduplication
-- [ ] Notification list/read endpoints
-- [ ] Realtime notification events
-- [ ] Deadline and dedupe tests
+- [x] Notification model
+- [x] Notification preferences
+- [x] BullMQ deadline schedule
+- [x] Upcoming deadline detection
+- [x] Overdue detection
+- [x] Notification deduplication
+- [x] Notification list/read endpoints
+- [x] Realtime notification events
+- [x] Deadline and dedupe tests
 
 **Acceptance demo:** Relay creates one appropriate notification for upcoming or overdue work without hourly duplicates.
 
 ### v0.10 — Natural-Language Commands
 
-- [ ] CommandLog model
-- [ ] Shared command intent contract
-- [ ] Python command graph
-- [ ] Project-context retrieval
-- [ ] Task entity resolution
-- [ ] Ambiguous-match responses
-- [ ] Read-only query execution in Node
-- [ ] Mutation preview and confirmation flow
-- [ ] Cancel flow
-- [ ] Authorized Node mutation execution
-- [ ] Command activity logging
-- [ ] Command parsing and confirmation tests
+- [x] CommandLog model
+- [x] Shared command intent contract
+- [x] Python command graph
+- [x] Project-context retrieval
+- [x] Task entity resolution
+- [x] Ambiguous-match responses
+- [x] Read-only query execution in Node
+- [x] Mutation preview and confirmation flow
+- [x] Cancel flow
+- [x] Authorized Node mutation execution
+- [x] Command activity logging
+- [x] Command parsing and confirmation tests
 
 **Acceptance demo:** “Move authentication to done” produces a preview and changes the task only after confirmation.
 
-### v0.11 — Integrations
-
-- [ ] Integration model and encrypted credentials strategy
-- [ ] Telegram connect/disconnect flow
-- [ ] Telegram notification delivery
-- [ ] Integration settings endpoints
-- [ ] Delivery retry and failure handling
-
-**Acceptance demo:** A user connects Telegram and receives selected Relay notifications.
-
 ### v1.0 — Portfolio Release
 
-- [ ] Complete all required core milestones
-- [ ] End-to-end first-meeting demo
-- [ ] End-to-end cross-meeting update demo
-- [ ] Project authorization security review
-- [ ] Expensive-route rate limiting
-- [ ] Provider failure and retry testing
-- [ ] Critical integration test suite
-- [ ] Swagger/OpenAPI coverage for public endpoints
-- [ ] Production environment documentation
-- [ ] Deployment and worker runbooks
-- [ ] Logging/privacy configuration review
-- [ ] Final README and demo dataset
+- [~] Complete all required core milestones (repository work complete; Atlas index deployment is external)
+- [x] End-to-end first-meeting demo
+- [x] End-to-end cross-meeting update demo
+- [x] Project authorization security review
+- [x] Expensive-route rate limiting
+- [x] Provider failure and retry testing
+- [x] Critical integration test suite
+- [x] Swagger/OpenAPI coverage for public endpoints
+- [x] Production environment documentation
+- [x] Deployment and worker runbooks
+- [x] Logging/privacy configuration review
+- [x] Final README and demo dataset
 
 **Acceptance demo:** Meeting one creates reviewed work; meeting two recognizes and proposes an update to that work; the human confirms it and can inspect the complete source history.
 
-## Product decisions still required
+## Product decisions
 
-- [ ] Initial LLM provider and model
-- [ ] Initial embedding provider and model
-- [ ] Initial transcription provider
-- [ ] Cloudinary versus S3-compatible audio storage
-- [ ] Refresh-token persistence and revocation details
-- [ ] Invitation acceptance mechanics
-- [ ] Transcript speaker-format conventions
-- [ ] Project timezone and relative-date rules
-- [ ] Exact field merge policy for `update_existing`
-- [ ] Notification recipient and preference defaults
+- [x] Initial LLM provider and model — Groq `qwen/qwen3.8-27b`
+- [x] Initial embedding provider and model — Gemini `gemini-embedding-001`
+- [x] Initial transcription provider — Groq `whisper-large-v3-turbo`
+- [x] Audio storage — private S3-compatible storage in production, local fallback in development
+- [x] Refresh tokens — hashed, revocable server-side sessions with rotation
+- [x] Invitation mechanics — direct addition of an existing Relay user by email
+- [x] Transcript speakers — parsed labels for pasted text; neutral/empty labels when audio has no diarization
+- [x] Project timezone and relative-date rules — UTC date storage; ambiguous relative dates are not inferred
+- [x] `update_existing` merge policy — apply only explicitly detected title, priority, due-date, and assignee differences after human confirmation
+- [x] Notification recipient and preference defaults — assignee first, otherwise creator; in-app plus type-specific preferences must be enabled
 
 ## Progress update rules
 

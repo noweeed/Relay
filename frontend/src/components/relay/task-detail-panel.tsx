@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { ArrowUpRight, Loader2, Mic, Trash2, X } from "lucide-react";
+import { ArrowUpRight, Loader2, MessageSquare, Mic, Send, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
@@ -28,10 +28,13 @@ import {
   type Meeting,
   type Priority,
   type Task,
+  type TaskComment,
 } from "@/lib/relay-data";
 import { apiErrorMessage } from "@/lib/api-client";
 import { useRelay } from "@/lib/relay-store";
 import { toast } from "sonner";
+import { useAuth } from "@/lib/auth-store";
+import { AssigneeMultiSelect } from "./assignee-multi-select";
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -46,7 +49,7 @@ type TaskDraft = {
   title: string;
   description: string;
   columnId: string;
-  assigneeId: string | null;
+  assigneeIds: string[];
   priority: Priority;
   due: string | null;
 };
@@ -55,9 +58,9 @@ type TaskDraft = {
 function createTaskDraft(task: Task): TaskDraft {
   return {
     title: task.title,
-    description: task.description,
+    description: task.description ?? "",
     columnId: task.columnId ?? "",
-    assigneeId: task.assigneeId,
+    assigneeIds: task.assigneeIds ?? (task.assigneeId ? [task.assigneeId] : []),
     priority: task.priority,
     due: task.due,
   };
@@ -72,51 +75,84 @@ export function TaskDetailPanel({
   meetings: Meeting[];
   onClose: () => void;
 }) {
-  const { updateTask, deleteTask, loadTaskActivity, activeProject, members } = useRelay();
+  const {
+    updateTask,
+    deleteTask,
+    loadTaskActivity,
+    loadTaskComments,
+    addTaskComment,
+    activeProject,
+    members,
+  } = useRelay();
+  const { user } = useAuth();
   const columns = activeProject?.kanbanColumns ?? [];
   const navigate = useNavigate();
   const [draft, setDraft] = useState<TaskDraft>(() => createTaskDraft(task));
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deleteConfirmationOpen, setDeleteConfirmationOpen] = useState(false);
   const [saveConfirmationOpen, setSaveConfirmationOpen] = useState(false);
   const [discardConfirmationOpen, setDiscardConfirmationOpen] = useState(false);
+  const [comments, setComments] = useState<TaskComment[]>([]);
+  const [commentBody, setCommentBody] = useState("");
+  const [commenting, setCommenting] = useState(false);
+  const currentAssigneeIds = task.assigneeIds ?? (task.assigneeId ? [task.assigneeId] : []);
+  const canEdit =
+    activeProject?.role === "owner" ||
+    activeProject?.role === "admin" ||
+    Boolean(user && currentAssigneeIds.includes(user.id));
   const source = meetings.find((m) => m.id === task.sourceMeetingId);
   const isDirty =
     draft.title !== task.title ||
-    draft.description !== task.description ||
+    draft.description !== (task.description ?? "") ||
     draft.columnId !== (task.columnId ?? "") ||
-    draft.assigneeId !== task.assigneeId ||
+    draft.assigneeIds.join(",") !== currentAssigneeIds.join(",") ||
     draft.priority !== task.priority ||
     draft.due !== task.due;
   const titleIsValid = draft.title.trim().length >= 2;
 
   useEffect(() => {
-    loadTaskActivity(task.id).catch((error: unknown) => toast.error(apiErrorMessage(error)));
-  }, [loadTaskActivity, task.id]);
+    Promise.all([loadTaskActivity(task.id), loadTaskComments(task.id)])
+      .then(([, loadedComments]) => setComments(loadedComments))
+      .catch((error: unknown) => toast.error(apiErrorMessage(error)));
+  }, [loadTaskActivity, loadTaskComments, task.id]);
 
   /** Saves all confirmed draft changes in one request. */
   async function saveChanges() {
-    if (!isDirty || !titleIsValid) return;
+    if (!canEdit || !isDirty || !titleIsValid) return;
     setSaving(true);
     try {
-      const updatedTask = await updateTask(
-        task.id,
-        {
-          title: draft.title.trim(),
-          description: draft.description,
-          columnId: draft.columnId,
-          assigneeId: draft.assigneeId,
-          priority: draft.priority,
-          due: draft.due,
-        },
-        "Task details updated",
-      );
+      const updatedTask = await updateTask(task.id, {
+        title: draft.title.trim(),
+        description: draft.description,
+        columnId: draft.columnId,
+        assigneeIds: draft.assigneeIds,
+        priority: draft.priority,
+        due: draft.due,
+      });
       setDraft(createTaskDraft(updatedTask));
+      await loadTaskActivity(task.id);
       toast.success("Task changes saved");
     } catch (error) {
       toast.error(apiErrorMessage(error));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function submitComment() {
+    const body = commentBody.trim();
+    if (!canEdit || !body) return;
+    setCommenting(true);
+    try {
+      const comment = await addTaskComment(task.id, body);
+      setComments((current) => [...current, comment]);
+      setCommentBody("");
+      await loadTaskActivity(task.id);
+    } catch (error) {
+      toast.error(apiErrorMessage(error));
+    } finally {
+      setCommenting(false);
     }
   }
 
@@ -131,7 +167,6 @@ export function TaskDetailPanel({
 
   /** Confirms and performs the owner/admin-only backend deletion. */
   async function removeTask() {
-    if (!window.confirm(`Delete "${task.title}"? This cannot be undone.`)) return;
     setDeleting(true);
     try {
       await deleteTask(task.id);
@@ -154,6 +189,7 @@ export function TaskDetailPanel({
           onChange={(event) => setDraft((current) => ({ ...current, title: event.target.value }))}
           aria-label="Task title"
           aria-invalid={!titleIsValid}
+          disabled={!canEdit}
           className="h-8 border-transparent px-1 text-[16px] font-semibold shadow-none hover:border-border focus-visible:border-border"
         />
         <Button variant="ghost" size="icon" onClick={requestClose} aria-label="Close task detail">
@@ -166,6 +202,7 @@ export function TaskDetailPanel({
           <Row label="Column">
             <Select
               value={draft.columnId}
+              disabled={!canEdit}
               onValueChange={(columnId) => setDraft((current) => ({ ...current, columnId }))}
             >
               <SelectTrigger className="h-8 w-full text-[13px]">
@@ -180,37 +217,18 @@ export function TaskDetailPanel({
               </SelectContent>
             </Select>
           </Row>
-          <Row label="Assignee">
-            <Select
-              value={draft.assigneeId ?? "none"}
-              onValueChange={(v) =>
-                setDraft((current) => ({
-                  ...current,
-                  assigneeId: v === "none" ? null : v,
-                }))
-              }
-            >
-              <SelectTrigger className="h-8 w-full text-[13px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Unassigned</SelectItem>
-                {members.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    <span className="flex items-center gap-2">
-                      <span className="flex size-[18px] items-center justify-center rounded-full bg-secondary text-[9px]">
-                        {m.name.slice(0, 1).toUpperCase()}
-                      </span>
-                      {m.name}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          <Row label="Assignees">
+            <AssigneeMultiSelect
+              members={members}
+              selectedIds={draft.assigneeIds}
+              onChange={(assigneeIds) => setDraft((current) => ({ ...current, assigneeIds }))}
+              disabled={!canEdit}
+            />
           </Row>
           <Row label="Priority">
             <Select
               value={draft.priority}
+              disabled={!canEdit}
               onValueChange={(v) =>
                 setDraft((current) => ({ ...current, priority: v as Priority }))
               }
@@ -233,6 +251,7 @@ export function TaskDetailPanel({
               className="h-8 text-[13px]"
               value={draft.due ?? ""}
               onChange={(e) => setDraft((current) => ({ ...current, due: e.target.value || null }))}
+              disabled={!canEdit}
             />
           </Row>
           <Row label="Project">
@@ -251,8 +270,65 @@ export function TaskDetailPanel({
             onChange={(e) => setDraft((current) => ({ ...current, description: e.target.value }))}
             placeholder="Add detail for whoever picks this up."
             className="text-[13.5px]"
+            disabled={!canEdit}
           />
         </div>
+
+        <section className="space-y-3">
+          <div className="flex items-center gap-2">
+            <MessageSquare className="size-4 text-primary" />
+            <h3 className="text-[13px] font-semibold">Comments</h3>
+          </div>
+          {comments.length === 0 ? (
+            <p className="text-[12.5px] text-subtle">No comments yet.</p>
+          ) : (
+            <ol className="space-y-2.5">
+              {comments.map((comment) => (
+                <li
+                  key={comment.id}
+                  className="rounded-lg border border-border bg-secondary/45 p-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="text-[12.5px] font-medium">{comment.authorName}</span>
+                    <span className="meta-text">
+                      {new Date(comment.createdAt).toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="mt-1.5 whitespace-pre-wrap text-[13px]">{comment.body}</p>
+                </li>
+              ))}
+            </ol>
+          )}
+          {canEdit ? (
+            <div className="flex items-end gap-2">
+              <Textarea
+                rows={2}
+                value={commentBody}
+                onChange={(event) => setCommentBody(event.target.value)}
+                placeholder="Write a comment…"
+                maxLength={2_000}
+                className="text-[13px]"
+              />
+              <Button
+                type="button"
+                size="icon"
+                disabled={commenting || !commentBody.trim()}
+                onClick={() => void submitComment()}
+                aria-label="Add comment"
+              >
+                {commenting ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Send className="size-4" />
+                )}
+              </Button>
+            </div>
+          ) : (
+            <p className="text-[12.5px] text-subtle">
+              Only an owner, admin, or assignee can comment.
+            </p>
+          )}
+        </section>
 
         {source ? (
           <section className="space-y-2.5">
@@ -294,7 +370,10 @@ export function TaskDetailPanel({
               <li key={a.id} className="flex gap-2.5">
                 <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-border-strong" />
                 <span>
-                  <span className="block text-[13px]">{a.text}</span>
+                  <span className="block text-[13px]">
+                    {a.actorName ? <strong className="font-medium">{a.actorName} </strong> : null}
+                    {a.text}
+                  </span>
                   <span className="meta-text">{a.at}</span>
                 </span>
               </li>
@@ -307,7 +386,7 @@ export function TaskDetailPanel({
             variant="destructive"
             size="sm"
             disabled={deleting}
-            onClick={() => void removeTask()}
+            onClick={() => setDeleteConfirmationOpen(true)}
           >
             {deleting ? <Loader2 className="size-4 animate-spin" /> : <Trash2 className="size-4" />}
             Delete task
@@ -320,14 +399,18 @@ export function TaskDetailPanel({
         <Button variant="outline" size="sm" onClick={requestClose}>
           Cancel
         </Button>
-        <Button
-          size="sm"
-          disabled={!isDirty || !titleIsValid || saving}
-          onClick={() => setSaveConfirmationOpen(true)}
-        >
-          {saving ? <Loader2 className="size-4 animate-spin" /> : null}
-          Save changes
-        </Button>
+        {canEdit ? (
+          <Button
+            size="sm"
+            disabled={!isDirty || !titleIsValid || saving}
+            onClick={() => setSaveConfirmationOpen(true)}
+          >
+            {saving ? <Loader2 className="size-4 animate-spin" /> : null}
+            Save changes
+          </Button>
+        ) : (
+          <span className="text-[12px] text-subtle">View only</span>
+        )}
       </div>
 
       <AlertDialog open={saveConfirmationOpen} onOpenChange={setSaveConfirmationOpen}>
@@ -362,6 +445,35 @@ export function TaskDetailPanel({
               onClick={onClose}
             >
               Discard changes
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={deleteConfirmationOpen} onOpenChange={setDeleteConfirmationOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this task?</AlertDialogTitle>
+            <AlertDialogDescription>
+              “{task.title}” and its comments will be permanently removed. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(event) => {
+                event.preventDefault();
+                void removeTask();
+              }}
+            >
+              {deleting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+              Delete task
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

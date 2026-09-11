@@ -3,13 +3,17 @@ import { OAuth2Client } from "google-auth-library";
 import mongoose, { Types } from "mongoose";
 import { env } from "../config/env";
 import { Membership } from "../models/Membership.model";
+import { CommandLog } from "../models/CommandLog.model";
+import { Notification } from "../models/Notification.model";
 import { RefreshSession } from "../models/RefreshSession.model";
+import { Task } from "../models/Task.model";
 import {
   User,
   type NotificationPreferences,
   type UserDocument,
 } from "../models/User.model";
 import { ApiError } from "../utils/ApiError";
+import { disconnectUserSockets } from "../sockets/io";
 import {
   hashToken,
   signAccessToken,
@@ -343,10 +347,18 @@ export async function deleteAccount(
       throw new ApiError(401, "UNAUTHORIZED", "Current password is incorrect.");
   }
   await mongoose.connection.transaction(async (session) => {
+    await CommandLog.deleteMany({ userId }, { session });
+    await Task.updateMany(
+      { $or: [{ assigneeIds: userId }, { assigneeId: userId }] },
+      { $pull: { assigneeIds: userId }, $unset: { assigneeId: 1 } },
+      { session },
+    );
     await Membership.deleteMany({ userId }, { session });
+    await Notification.deleteMany({ userId }, { session });
     await RefreshSession.deleteMany({ userId }, { session });
     await User.deleteOne({ _id: userId }, { session });
   });
+  await disconnectUserSockets(userId);
 }
 
 /** Verifies a Google ID token and creates or links the corresponding Relay account. */
@@ -361,10 +373,18 @@ export async function authenticateWithGoogle(
       "Google sign-in is not configured.",
     );
   }
-  const ticket = await googleClient.verifyIdToken({
-    idToken: input.credential,
-    audience: env.GOOGLE_CLIENT_ID,
-  });
+  const ticket = await googleClient
+    .verifyIdToken({
+      idToken: input.credential,
+      audience: env.GOOGLE_CLIENT_ID,
+    })
+    .catch(() => {
+      throw new ApiError(
+        401,
+        "UNAUTHORIZED",
+        "Google could not verify this account.",
+      );
+    });
   const payload = ticket.getPayload();
   if (!payload?.sub || !payload.email || payload.email_verified !== true) {
     throw new ApiError(

@@ -32,7 +32,7 @@ describe("meeting transcript flow", () => {
     await database.stop();
   });
 
-  it("allows a member to paste, list, retrieve, and manage a meeting transcript", async () => {
+  it("allows owners to add meetings while members retain read access", async () => {
     const owner = request.agent(app);
     const member = request.agent(app);
     const outsider = request.agent(app);
@@ -80,9 +80,24 @@ describe("meeting transcript flow", () => {
       "Sarah: I'll write the tests for it"
     ].join("\n");
 
-    const createRes = await member
+    await member
       .post(`/api/projects/${projectId}/meetings`)
       .set("Authorization", `Bearer ${memberToken}`)
+      .send({ title: "Forbidden transcript", transcript })
+      .expect(403);
+    await member
+      .post(`/api/projects/${projectId}/meetings/transcript`)
+      .set("Authorization", `Bearer ${memberToken}`)
+      .send({ title: "Forbidden transcript", transcript })
+      .expect(403);
+    await member
+      .post(`/api/projects/${projectId}/meetings/audio`)
+      .set("Authorization", `Bearer ${memberToken}`)
+      .expect(403);
+
+    const createRes = await owner
+      .post(`/api/projects/${projectId}/meetings`)
+      .set("Authorization", `Bearer ${ownerToken}`)
       .send({ title: "Sprint Planning", transcript });
 
     expect(createRes.status).toBe(201);

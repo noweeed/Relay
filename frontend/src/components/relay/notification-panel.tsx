@@ -22,7 +22,7 @@ export function NotificationPanel() {
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <h2 className="text-[13.5px] font-semibold">Notifications</h2>
         <button
-          onClick={markAllRead}
+          onClick={() => void markAllRead()}
           disabled={unreadCount === 0}
           className="text-[12.5px] text-muted-foreground transition-colors duration-150 hover:text-foreground disabled:opacity-50"
         >
@@ -35,7 +35,7 @@ export function NotificationPanel() {
           return (
             <li key={n.id}>
               <button
-                onClick={() => toggleRead(n.id)}
+                onClick={() => void toggleRead(n.id)}
                 className="flex w-full gap-3 px-4 py-3 text-left transition-colors duration-150 hover:bg-secondary"
               >
                 <Icon className={cn("mt-0.5 size-4 shrink-0", tones[n.kind])} />

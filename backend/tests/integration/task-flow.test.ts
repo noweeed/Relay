@@ -8,6 +8,7 @@ import { Project } from "../../src/models/Project.model";
 import { RefreshSession } from "../../src/models/RefreshSession.model";
 import { Task } from "../../src/models/Task.model";
 import { TaskActivity } from "../../src/models/TaskActivity.model";
+import { TaskComment } from "../../src/models/TaskComment.model";
 import { User } from "../../src/models/User.model";
 
 describe("project-scoped Kanban task flow", () => {
@@ -24,7 +25,8 @@ describe("project-scoped Kanban task flow", () => {
       Project.init(),
       Membership.init(),
       Task.init(),
-      TaskActivity.init()
+      TaskActivity.init(),
+      TaskComment.init()
     ]);
   }, 120_000);
 
@@ -44,6 +46,7 @@ describe("project-scoped Kanban task flow", () => {
       password: "task-owner-secure-password"
     });
     const ownerToken = ownerSignup.body.data.accessToken as string;
+    const ownerId = ownerSignup.body.data.user.id as string;
 
     const memberSignup = await member.post("/api/auth/signup").send({
       name: "Task Member",
@@ -85,14 +88,22 @@ describe("project-scoped Kanban task flow", () => {
       .send({
         title: "Build Kanban API",
         description: "Implement task CRUD and activity",
-        assigneeId: memberId,
+        assigneeIds: [memberId, ownerId],
         dueDate: "2026-09-01T12:00:00.000Z",
         priority: "high"
     });
     expect(createResponse.status).toBe(201);
     expect(createResponse.body.data.columnId).toBe(todoColumnId);
     expect(createResponse.body.data.assigneeId).toBe(memberId);
+    expect(createResponse.body.data.assigneeIds).toEqual([memberId, ownerId]);
     const taskId = createResponse.body.data.id as string;
+
+    const commentResponse = await member
+      .post(`/api/projects/${projectId}/tasks/${taskId}/comments`)
+      .set("Authorization", `Bearer ${memberToken}`)
+      .send({ body: "I started the API work." });
+    expect(commentResponse.status).toBe(201);
+    expect(commentResponse.body.data.authorName).toBe("Task Member");
 
     const groupedResponse = await member
       .get(`/api/projects/${projectId}/tasks`)
@@ -113,10 +124,34 @@ describe("project-scoped Kanban task flow", () => {
     const updateResponse = await member
       .patch(`/api/projects/${projectId}/tasks/${taskId}`)
       .set("Authorization", `Bearer ${memberToken}`)
-      .send({ columnId: inProgressColumnId, priority: "medium", assigneeId: null });
+      .send({
+        title: "Build and test Kanban API",
+        description: "Implement task CRUD, comments, and activity",
+        columnId: inProgressColumnId,
+        priority: "medium",
+        assigneeIds: [ownerId]
+      });
     expect(updateResponse.status).toBe(200);
     expect(updateResponse.body.data.columnId).toBe(inProgressColumnId);
-    expect(updateResponse.body.data.assigneeId).toBeUndefined();
+    expect(updateResponse.body.data.assigneeIds).toEqual([ownerId]);
+
+    const forbiddenFormerAssigneeEdit = await member
+      .patch(`/api/projects/${projectId}/tasks/${taskId}`)
+      .set("Authorization", `Bearer ${memberToken}`)
+      .send({ priority: "low" });
+    expect(forbiddenFormerAssigneeEdit.status).toBe(403);
+
+    const forbiddenFormerAssigneeComment = await member
+      .post(`/api/projects/${projectId}/tasks/${taskId}/comments`)
+      .set("Authorization", `Bearer ${memberToken}`)
+      .send({ body: "I should no longer be allowed." });
+    expect(forbiddenFormerAssigneeComment.status).toBe(403);
+
+    const commentsResponse = await member
+      .get(`/api/projects/${projectId}/tasks/${taskId}/comments`)
+      .set("Authorization", `Bearer ${memberToken}`);
+    expect(commentsResponse.status).toBe(200);
+    expect(commentsResponse.body.data).toHaveLength(1);
 
     const activityResponse = await member
       .get(`/api/projects/${projectId}/tasks/${taskId}/activity`)
@@ -124,10 +159,14 @@ describe("project-scoped Kanban task flow", () => {
     expect(activityResponse.status).toBe(200);
     expect(activityResponse.body.data.map((event: { type: string }) => event.type)).toEqual([
       "created",
+      "commented",
       "column_changed",
+      "title_changed",
+      "description_changed",
       "priority_changed",
       "assignee_changed"
     ]);
+    expect(activityResponse.body.data[1].actorName).toBe("Task Member");
 
     const forbiddenRead = await outsider
       .get(`/api/projects/${projectId}/tasks/${taskId}`)
@@ -145,5 +184,6 @@ describe("project-scoped Kanban task flow", () => {
     expect(ownerDelete.status).toBe(200);
     expect(await Task.exists({ _id: taskId })).toBeNull();
     expect(await TaskActivity.exists({ taskId })).toBeNull();
+    expect(await TaskComment.exists({ taskId })).toBeNull();
   });
 });

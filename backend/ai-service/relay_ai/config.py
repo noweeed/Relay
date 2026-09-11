@@ -34,6 +34,36 @@ class Settings(BaseSettings):
     groq_timeout_seconds: float = Field(
         default=60, alias="GROQ_TIMEOUT_SECONDS", gt=0, le=300
     )
+    groq_max_completion_tokens: int = Field(
+        default=800, alias="GROQ_MAX_COMPLETION_TOKENS", ge=128, le=32_768
+    )
+    groq_transcription_model: str = Field(
+        default="whisper-large-v3-turbo", alias="GROQ_TRANSCRIPTION_MODEL"
+    )
+    groq_transcription_language: str | None = Field(
+        default=None, alias="GROQ_TRANSCRIPTION_LANGUAGE"
+    )
+    groq_transcription_timeout_seconds: float = Field(
+        default=120, alias="GROQ_TRANSCRIPTION_TIMEOUT_SECONDS", gt=0, le=600
+    )
+    gemini_api_key: SecretStr | None = Field(default=None, alias="GEMINI_API_KEY")
+    gemini_embedding_model: str = Field(
+        default="gemini-embedding-001", alias="GEMINI_EMBEDDING_MODEL"
+    )
+    embedding_dimensions: int = Field(default=1536, alias="EMBEDDING_DIMENSIONS", ge=1, le=8_192)
+    embedding_timeout_seconds: float = Field(
+        default=30, alias="EMBEDDING_TIMEOUT_SECONDS", gt=0, le=300
+    )
+    mongodb_database: str | None = Field(default=None, alias="MONGODB_DATABASE")
+    atlas_vector_index: str = Field(
+        default="task_embedding_index", alias="ATLAS_VECTOR_INDEX"
+    )
+    duplicate_medium_threshold: float = Field(
+        default=0.80, alias="DUPLICATE_MEDIUM_THRESHOLD", ge=0, le=1
+    )
+    duplicate_high_threshold: float = Field(
+        default=0.90, alias="DUPLICATE_HIGH_THRESHOLD", ge=0, le=1
+    )
     transcript_chunk_max_chars: int = Field(
         default=12_000,
         alias="TRANSCRIPT_CHUNK_MAX_CHARS",

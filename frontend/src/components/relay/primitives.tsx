@@ -1,23 +1,17 @@
 import { cn } from "@/lib/utils";
-import {
-  initials,
-  memberById,
-  priorityLabel,
-  statusLabel,
-  type Priority,
-  type Status,
-} from "@/lib/relay-data";
+import { initials, priorityLabel, statusLabel, type Priority, type Status } from "@/lib/relay-data";
 
 export function UserAvatar({
   memberId,
+  memberName,
   size = 24,
   className,
 }: {
   memberId: string | null | undefined;
+  memberName?: string | undefined;
   size?: number;
   className?: string;
 }) {
-  const m = memberById(memberId);
   return (
     <span
       className={cn(
@@ -27,7 +21,56 @@ export function UserAvatar({
       style={{ width: size, height: size, fontSize: Math.max(10, size * 0.4) }}
       aria-hidden="true"
     >
-      {m ? initials(m.name) : "?"}
+      {memberName ? initials(memberName) : memberId ? "U" : "?"}
+    </span>
+  );
+}
+
+export function AssigneeAvatarGroup({
+  memberIds = [],
+  memberNames = [],
+  size = 24,
+  max = 3,
+  className,
+}: {
+  memberIds?: string[];
+  memberNames?: string[];
+  size?: number;
+  max?: number;
+  className?: string;
+}) {
+  const assigneeCount = Math.max(memberIds.length, memberNames.length);
+  const visibleCount = Math.min(assigneeCount, max);
+  const label = memberNames.length > 0 ? memberNames.join(", ") : "Unassigned";
+
+  if (assigneeCount === 0) {
+    return <UserAvatar memberId={null} size={size} {...(className ? { className } : {})} />;
+  }
+
+  return (
+    <span
+      className={cn("inline-flex shrink-0 -space-x-1.5", className)}
+      aria-label={`Assignees: ${label}`}
+      title={label}
+    >
+      {Array.from({ length: visibleCount }, (_, index) => (
+        <UserAvatar
+          key={memberIds[index] ?? `${memberNames[index] ?? "assignee"}-${index}`}
+          memberId={memberIds[index]}
+          memberName={memberNames[index]}
+          size={size}
+          className="ring-2 ring-card"
+        />
+      ))}
+      {assigneeCount > max ? (
+        <span
+          className="relative inline-flex shrink-0 items-center justify-center rounded-full bg-secondary font-medium text-muted-foreground ring-2 ring-card"
+          style={{ width: size, height: size, fontSize: Math.max(9, size * 0.36) }}
+          aria-hidden="true"
+        >
+          +{assigneeCount - max}
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -41,8 +84,7 @@ export function AssigneeChip({
   memberName?: string;
   size?: number;
 }) {
-  const m = memberById(memberId);
-  const name = memberName ?? m?.name;
+  const name = memberName;
   return (
     <span className="inline-flex items-center gap-1.5 text-[13px] text-muted-foreground">
       {name ? (

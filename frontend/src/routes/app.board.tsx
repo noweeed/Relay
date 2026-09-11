@@ -20,11 +20,12 @@ import { apiErrorMessage } from "@/lib/api-client";
 import { useRelay } from "@/lib/relay-store";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { useAuth } from "@/lib/auth-store";
 
 export const Route = createFileRoute("/app/board")({
   head: () => ({
     meta: [
-      { title: "Board | Relay" },
+      { title: "Relay" },
       {
         name: "description",
         content: "Kanban board of approved tasks, each linked back to the meeting it came from.",
@@ -42,6 +43,7 @@ export const Route = createFileRoute("/app/board")({
 function BoardPage() {
   const { activeProject, members, tasks, tasksLoading, tasksError, meetings, moveTask } =
     useRelay();
+  const { user } = useAuth();
   const columns = activeProject?.kanbanColumns ?? [];
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
@@ -54,11 +56,17 @@ function BoardPage() {
   const [addOpen, setAddOpen] = useState(false);
   const [columnOpen, setColumnOpen] = useState(false);
   const canManageColumns = activeProject?.role === "owner" || activeProject?.role === "admin";
+  const canEditTask = (task: (typeof tasks)[number]) =>
+    canManageColumns ||
+    Boolean(
+      user && (task.assigneeIds ?? (task.assigneeId ? [task.assigneeId] : [])).includes(user.id),
+    );
 
   const filtered = tasks.filter(
     (t) =>
       t.title.toLowerCase().includes(query.toLowerCase()) &&
-      (assignee === "all" || t.assigneeId === assignee) &&
+      (assignee === "all" ||
+        (t.assigneeIds ?? (t.assigneeId ? [t.assigneeId] : [])).includes(assignee)) &&
       (priority === "all" || t.priority === priority),
   );
 
@@ -206,8 +214,10 @@ function BoardPage() {
                     {items.map((t) => (
                       <div
                         key={t.id}
-                        draggable
-                        onDragStart={() => setDragId(t.id)}
+                        draggable={canEditTask(t)}
+                        onDragStart={() => {
+                          if (canEditTask(t)) setDragId(t.id);
+                        }}
                         onDragEnd={() => setDragId(null)}
                         className="relative"
                       >

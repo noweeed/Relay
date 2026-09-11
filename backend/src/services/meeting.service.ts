@@ -78,8 +78,9 @@ export async function createAudioMeeting(
   file: Express.Multer.File
 ): Promise<MeetingResponse> {
   const stored = await storeAudio(file);
+  let meeting: MeetingDocument;
   try {
-    const meeting = await Meeting.create({
+    meeting = await Meeting.create({
       projectId,
       title: input.title,
       type: "audio",
@@ -91,11 +92,12 @@ export async function createAudioMeeting(
       segmentCount: 0,
       createdBy: userId
     });
-    return serializeMeeting(meeting);
   } catch (error: unknown) {
     await deleteAudio(stored.storageKey);
     throw error;
   }
+  const queuedMeeting = await queueMeetingProcessing(meeting, userId, "meeting.transcribe");
+  return serializeMeeting(queuedMeeting);
 }
 
 export interface MeetingAudioResponse {
@@ -224,12 +226,16 @@ export async function getMeetingTasks(
   if (!meeting) throw new ApiError(404, "NOT_FOUND", "Meeting was not found.");
 
   const tasks = await Task.find({ projectId, "source.meetingId": meetingId }).sort({ createdAt: -1 });
-  return tasks.map((task) => ({
+  return tasks.map((task) => {
+    const assigneeIds = (task.assigneeIds ?? []).map((id) => id.toString());
+    if (assigneeIds.length === 0 && task.assigneeId) assigneeIds.push(task.assigneeId.toString());
+    return {
     id: task._id.toString(),
     projectId: task.projectId.toString(),
     title: task.title,
     ...(task.description ? { description: task.description } : {}),
-    ...(task.assigneeId ? { assigneeId: task.assigneeId.toString() } : {}),
+    assigneeIds,
+    ...(assigneeIds[0] ? { assigneeId: assigneeIds[0] } : {}),
     ...(task.dueDate ? { dueDate: task.dueDate } : {}),
     priority: task.priority,
     columnId: task.columnId,
@@ -246,7 +252,8 @@ export async function getMeetingTasks(
     createdBy: task.createdBy.toString(),
     createdAt: task.createdAt,
     updatedAt: task.updatedAt
-  }));
+    };
+  });
 }
 
 /** Advances a meeting's status along the defined state machine. */
@@ -281,7 +288,7 @@ export async function requestReprocess(
   meetingId: string,
   userId: string
 ): Promise<MeetingResponse> {
-  const meeting = await Meeting.findOne({ _id: meetingId, projectId });
+  const meeting = await Meeting.findOne({ _id: meetingId, projectId }).select("+audioStorageKey");
   if (!meeting) throw new ApiError(404, "NOT_FOUND", "Meeting was not found.");
 
   if (meeting.status !== "failed") {
@@ -289,6 +296,10 @@ export async function requestReprocess(
   }
 
   await transitionMeetingStatus(meeting, "created");
-  const queuedMeeting = await queueMeetingProcessing(meeting, userId, "meeting.reprocess");
+  const queuedMeeting = await queueMeetingProcessing(
+    meeting,
+    userId,
+    meeting.type === "audio" ? "meeting.transcribe" : "meeting.reprocess"
+  );
   return serializeMeeting(queuedMeeting);
 }

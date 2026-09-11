@@ -15,6 +15,15 @@ export const candidateCollectionParamsSchema = z.object({
   meetingId: objectId
 });
 
+export const duplicateParamsSchema = z.object({
+  projectId: objectId,
+  duplicateId: objectId
+});
+
+export const resolveDuplicateSchema = z.object({
+  action: z.enum(["update_existing", "create_separate", "ignore"])
+});
+
 export const listCandidatesQuerySchema = z.object({
   status: z.enum(TASK_CANDIDATE_STATUSES).optional()
 });
@@ -39,3 +48,4 @@ export const bulkCandidateActionSchema = z.object({
 export type ListCandidatesQuery = z.infer<typeof listCandidatesQuerySchema>;
 export type UpdateCandidateInput = z.infer<typeof updateCandidateSchema>;
 export type BulkCandidateActionInput = z.infer<typeof bulkCandidateActionSchema>;
+export type ResolveDuplicateInput = z.infer<typeof resolveDuplicateSchema>;

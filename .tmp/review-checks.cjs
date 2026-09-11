@@ -1,0 +1,58 @@
+const fs = require('node:fs');
+const ts = require('../backend/node_modules/typescript');
+require.extensions['.ts'] = (module, filename) => module._compile(ts.transpileModule(fs.readFileSync(filename, 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText, filename);
+Object.assign(process.env, { NODE_ENV: 'test', MONGODB_URI: 'mongodb://127.0.0.1/review-unused', REDIS_URL: '', LOG_LEVEL: 'silent', JWT_ACCESS_SECRET: 'review-access-secret-at-least-32-characters', JWT_REFRESH_SECRET: 'review-refresh-secret-at-least-32-characters' });
+const assert = require('node:assert/strict');
+const { once } = require('node:events');
+const { createServer } = require('node:http');
+const { io: connect } = require('../frontend/node_modules/socket.io-client');
+const { Membership } = require('../backend/src/models/Membership.model.ts');
+const { initializeSocketServer } = require('../backend/src/sockets/io.ts');
+const { signAccessToken } = require('../backend/src/utils/tokens.ts');
+const { removeProjectMember } = require('../backend/src/services/project.service.ts');
+const { emitTaskUpdated } = require('../backend/src/sockets/taskEvents.ts');
+const { Task } = require('../backend/src/models/Task.model.ts');
+const { Project } = require('../backend/src/models/Project.model.ts');
+const { User } = require('../backend/src/models/User.model.ts');
+const { Notification } = require('../backend/src/models/Notification.model.ts');
+const { runDeadlineMonitor } = require('../backend/src/services/deadline-monitor.service.ts');
+const projectId = 'aaaaaaaaaaaaaaaaaaaaaaaa', userId = 'bbbbbbbbbbbbbbbbbbbbbbbb';
+(async () => {
+  let member = true;
+  Membership.exists = async () => member ? { _id: userId } : null;
+  Membership.findOne = async () => ({ _id: userId, role: 'member' });
+  Membership.deleteOne = async () => { member = false; return { deletedCount: 1 }; };
+  const http = createServer();
+  const server = initializeSocketServer(http);
+  await new Promise(resolve => http.listen(0, '127.0.0.1', resolve));
+  const client = connect(`http://127.0.0.1:${http.address().port}`, { auth: { token: signAccessToken(userId) }, transports: ['websocket'], reconnection: false });
+  try {
+    await once(client, 'connect');
+    const joined = new Promise(resolve => server.of('/').adapter.on('join-room', room => { if (room === `project:${projectId}`) resolve(); }));
+    client.emit('project:join', projectId);
+    await joined;
+    await removeProjectMember(projectId, userId, 'cccccccccccccccccccccccc', 'owner');
+    assert.equal(member, false);
+    const received = once(client, 'task.updated');
+    emitTaskUpdated(projectId, { id: 'dddddddddddddddddddddddd', title: 'Private change after removal' });
+    const [payload] = await received;
+    assert.equal(payload.title, 'Private change after removal');
+    console.log('REPRODUCED: removed member receives task.updated over existing socket.');
+    Task.find = async () => [{ _id: 'dddddddddddddddddddddddd', projectId, assigneeId: userId, createdBy: userId, columnId: 'todo', title: 'New confidential title after removal', dueDate: new Date('2026-09-04') }];
+    Project.find = () => ({ lean: async () => [{ _id: projectId, kanbanColumns: [{ id: 'todo', category: 'todo' }] }] });
+    User.find = () => ({ lean: async () => [{ _id: userId, notificationPreferences: { inAppNotifications: true, overdueTasks: true } }] });
+    let inserted;
+    Notification.updateOne = async (_, update) => { inserted = update.$setOnInsert; return { upsertedId: 'eeeeeeeeeeeeeeeeeeeeeeee' }; };
+    Notification.findById = async () => null;
+    await runDeadlineMonitor({ now: new Date('2026-09-05') });
+    assert.equal(inserted.userId, userId);
+    assert.match(inserted.body, /New confidential title after removal/);
+    console.log('REPRODUCED: deadline monitor inserts private task details for removed member.');
+    const data = require('../frontend/src/lib/relay-data.ts');
+    assert.equal(data.isOverdue({ due: '2026-09-01', status: 'todo' }), false);
+    console.log('REPRODUCED: September 1 deadline is not overdue because TODAY is fixed at August 23.');
+  } finally {
+    client.disconnect();
+    await new Promise(resolve => server.close(resolve));
+  }
+})().catch(error => { console.error(error); process.exitCode = 1; });

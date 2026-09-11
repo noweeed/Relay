@@ -21,7 +21,7 @@ import { useAuth } from "@/lib/auth-store";
 export const Route = createFileRoute("/app/account")({
   head: () => ({
     meta: [
-      { title: "Account settings | Relay" },
+      { title: "Relay" },
       { name: "description", content: "Manage your Relay profile, security and notifications." },
     ],
   }),

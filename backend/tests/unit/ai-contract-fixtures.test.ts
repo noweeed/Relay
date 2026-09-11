@@ -4,6 +4,8 @@ import { describe, expect, it } from "vitest";
 import {
   aiJobEnvelopeSchema,
   aiResultEnvelopeSchema,
+  commandInterpretPayloadSchema,
+  commandInterpretResultSchema,
   meetingExtractionResultSchema
 } from "../../src/contracts/ai.contract";
 
@@ -25,6 +27,33 @@ describe("shared AI contract fixtures", () => {
       expect(extraction.tasks[0]?.sourceQuote).toBe(
         "I will finish the candidate review API by Friday."
       );
+    }
+  });
+
+  it("accepts timestamped audio transcription fixtures on both runtimes", () => {
+    const job = aiJobEnvelopeSchema.parse(loadFixture("meeting_transcribe_job.json"));
+    const result = aiResultEnvelopeSchema.parse(loadFixture("meeting_transcribe_result.json"));
+
+    expect(job.jobType).toBe("meeting.transcribe");
+    expect(result.status).toBe("succeeded");
+    if (result.status === "succeeded") {
+      const extraction = meetingExtractionResultSchema.parse(result.payload);
+      expect(extraction.transcript?.[0]).toMatchObject({ startMs: 250, endMs: 2800 });
+    }
+  });
+
+  it("accepts command interpretation fixtures on both runtimes", () => {
+    const job = aiJobEnvelopeSchema.parse(loadFixture("command_interpret_job.json"));
+    const result = aiResultEnvelopeSchema.parse(loadFixture("command_interpret_result.json"));
+
+    const payload = commandInterpretPayloadSchema.parse(job.payload);
+    expect(payload.text).toBe("Move authentication to done");
+    if (result.status === "succeeded") {
+      const interpretation = commandInterpretResultSchema.parse(result.payload);
+      expect(interpretation).toMatchObject({
+        intent: "update_task_status",
+        requiresConfirmation: true,
+      });
     }
   });
 });

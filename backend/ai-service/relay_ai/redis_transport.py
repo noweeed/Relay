@@ -44,8 +44,17 @@ class RedisTransport:
     @classmethod
     def from_settings(cls, settings: Settings) -> "RedisTransport":
         """Create a decoded Redis connection from validated worker settings."""
-        client = Redis.from_url(settings.redis_url, decode_responses=True)
+        client = Redis.from_url(
+            settings.redis_url,
+            decode_responses=True,
+            health_check_interval=30,
+            socket_keepalive=True,
+        )
         return cls(client, settings)
+
+    def reconnect(self) -> None:
+        """Discard stale pooled sockets so the next command opens a fresh connection."""
+        self._client.connection_pool.disconnect()
 
     def ping(self) -> bool:
         """Verify that the configured Redis server is reachable."""
@@ -147,6 +156,17 @@ class RedisTransport:
             self._settings.ai_job_stream,
             self._settings.ai_worker_consumer_group,
             stream_id,
+        )
+
+    def renew_job(self, stream_id: str, consumer_name: str) -> None:
+        """Refresh one active delivery so another worker cannot reclaim it mid-call."""
+        self._client.xclaim(
+            self._settings.ai_job_stream,
+            self._settings.ai_worker_consumer_group,
+            consumer_name,
+            0,
+            [stream_id],
+            justid=True,
         )
 
     def publish_dead_letter(

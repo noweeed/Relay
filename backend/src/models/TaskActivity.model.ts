@@ -5,11 +5,14 @@ export const TASK_ACTIVITY_TYPES = [
   "created",
   "extracted",
   "approved",
+  "title_changed",
+  "description_changed",
   "column_changed",
   "deadline_changed",
   "assignee_changed",
   "priority_changed",
-  "duplicate_resolved"
+  "duplicate_resolved",
+  "commented"
 ] as const;
 
 export type TaskActivityActorType = (typeof TASK_ACTIVITY_ACTOR_TYPES)[number];

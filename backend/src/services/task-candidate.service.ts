@@ -1,4 +1,11 @@
 import mongoose, { type ClientSession, type HydratedDocument, type Types } from "mongoose";
+import {
+  DuplicateCandidate,
+  type DuplicateCandidateDocument,
+  type DuplicateDifferences,
+  type DuplicateResolution,
+  type DuplicateSimilarityLabel
+} from "../models/DuplicateCandidate.model";
 import { Membership } from "../models/Membership.model";
 import { Meeting } from "../models/Meeting.model";
 import { Project } from "../models/Project.model";
@@ -11,11 +18,13 @@ import { Task, type TaskDocument, type TaskPriority } from "../models/Task.model
 import { TaskActivity } from "../models/TaskActivity.model";
 import { TranscriptSegment } from "../models/TranscriptSegment.model";
 import { emitMeetingProgress } from "../sockets/meetingEvents";
-import { emitTaskCreated } from "../sockets/taskEvents";
+import { emitTaskCreated, emitTaskUpdated } from "../sockets/taskEvents";
 import { ApiError } from "../utils/ApiError";
-import type { TaskResponse } from "./task.service";
+import { queueEmbeddingRefresh } from "./embedding-refresh.service";
+import { assertCanWorkOnTask, type TaskResponse } from "./task.service";
 import type {
   ListCandidatesQuery,
+  ResolveDuplicateInput,
   UpdateCandidateInput
 } from "../validators/task-candidate.validator";
 
@@ -35,6 +44,13 @@ export interface TaskCandidateResponse {
   createdTaskId?: string;
   createdAt: Date;
   updatedAt: Date;
+  duplicate?: {
+    id: string;
+    existingTaskId: string;
+    similarityLabel: DuplicateSimilarityLabel;
+    differences: DuplicateDifferences;
+    resolution: DuplicateResolution;
+  };
 }
 
 export interface CandidateApprovalResponse {
@@ -44,10 +60,22 @@ export interface CandidateApprovalResponse {
 
 type TimestampMap = Map<string, number | undefined>;
 type TaskCandidateRecord = HydratedDocument<TaskCandidateDocument>;
+type DuplicateCandidateRecord = HydratedDocument<DuplicateCandidateDocument>;
+
+function serializeDuplicate(duplicate: DuplicateCandidateDocument) {
+  return {
+    id: duplicate._id.toString(),
+    existingTaskId: duplicate.existingTaskId.toString(),
+    similarityLabel: duplicate.similarityLabel,
+    differences: duplicate.differences,
+    resolution: duplicate.resolution
+  };
+}
 
 function serializeCandidate(
   candidate: TaskCandidateDocument,
-  sourceTimestampMs?: number
+  sourceTimestampMs?: number,
+  duplicate?: DuplicateCandidateDocument
 ): TaskCandidateResponse {
   return {
     id: candidate._id.toString(),
@@ -66,17 +94,21 @@ function serializeCandidate(
     status: candidate.status,
     ...(candidate.createdTaskId ? { createdTaskId: candidate.createdTaskId.toString() } : {}),
     createdAt: candidate.createdAt,
-    updatedAt: candidate.updatedAt
+    updatedAt: candidate.updatedAt,
+    ...(duplicate ? { duplicate: serializeDuplicate(duplicate) } : {})
   };
 }
 
 function serializeTask(task: TaskDocument): TaskResponse {
+  const assigneeIds = (task.assigneeIds ?? []).map((id) => id.toString());
+  if (assigneeIds.length === 0 && task.assigneeId) assigneeIds.push(task.assigneeId.toString());
   return {
     id: task._id.toString(),
     projectId: task.projectId.toString(),
     title: task.title,
     ...(task.description ? { description: task.description } : {}),
-    ...(task.assigneeId ? { assigneeId: task.assigneeId.toString() } : {}),
+    assigneeIds,
+    ...(assigneeIds[0] ? { assigneeId: assigneeIds[0] } : {}),
     ...(task.dueDate ? { dueDate: task.dueDate } : {}),
     priority: task.priority,
     columnId: task.columnId,
@@ -193,9 +225,7 @@ async function approveInSession(
         projectId: candidate.projectId,
         title: candidate.title,
         ...(candidate.description ? { description: candidate.description } : {}),
-        ...(candidate.suggestedAssigneeId
-          ? { assigneeId: candidate.suggestedAssigneeId }
-          : {}),
+        assigneeIds: candidate.suggestedAssigneeId ? [candidate.suggestedAssigneeId] : [],
         ...(candidate.suggestedDueDate ? { dueDate: candidate.suggestedDueDate } : {}),
         priority: candidate.suggestedPriority,
         columnId,
@@ -205,7 +235,8 @@ async function approveInSession(
           quote: candidate.sourceQuote,
           ...(segment?.startMs !== undefined ? { timestampMs: segment.startMs } : {})
         },
-        createdBy: userId
+        createdBy: userId,
+        ...(candidate.embedding ? { embedding: candidate.embedding } : {})
       }
     ],
     { session }
@@ -251,11 +282,18 @@ export async function listCandidates(
   const filter: Record<string, unknown> = { projectId, meetingId };
   if (query.status) filter.status = query.status;
   const candidates = await TaskCandidate.find(filter).sort({ createdAt: 1, _id: 1 });
-  const timestamps = await loadTimestamps(candidates);
+  const [timestamps, duplicates] = await Promise.all([
+    loadTimestamps(candidates),
+    DuplicateCandidate.find({ taskCandidateId: { $in: candidates.map((candidate) => candidate._id) } })
+  ]);
+  const duplicateByCandidate = new Map(
+    duplicates.map((duplicate) => [duplicate.taskCandidateId.toString(), duplicate])
+  );
   return candidates.map((candidate) =>
     serializeCandidate(
       candidate,
-      candidate.segmentId ? timestamps.get(candidate.segmentId.toString()) : undefined
+      candidate.segmentId ? timestamps.get(candidate.segmentId.toString()) : undefined,
+      duplicateByCandidate.get(candidate._id.toString())
     )
   );
 }
@@ -264,6 +302,7 @@ export async function updateCandidate(
   projectId: string,
   meetingId: string,
   candidateId: string,
+  userId: string,
   input: UpdateCandidateInput
 ): Promise<TaskCandidateResponse> {
   await assertMeeting(projectId, meetingId);
@@ -271,8 +310,14 @@ export async function updateCandidate(
 
   const candidate = await TaskCandidate.findOne({ _id: candidateId, projectId, meetingId });
   if (!candidate) throw new ApiError(404, "NOT_FOUND", "Task candidate was not found.");
-  if (candidate.status !== "pending" && candidate.status !== "duplicate_pending") {
-    throw new ApiError(409, "CONFLICT", "Reviewed candidates can no longer be edited.");
+  if (candidate.status !== "pending") {
+    throw new ApiError(
+      409,
+      "CONFLICT",
+      candidate.status === "duplicate_pending"
+        ? "Resolve the possible duplicate before editing."
+        : "Reviewed candidates can no longer be edited."
+    );
   }
 
   const $set: Record<string, unknown> = {};
@@ -284,6 +329,7 @@ export async function updateCandidate(
     if (input[field] === null) $unset[field] = 1;
     else if (input[field] !== undefined) $set[field] = input[field];
   }
+  if (input.title !== undefined || input.description !== undefined) $unset.embedding = 1;
   const updated = await TaskCandidate.findOneAndUpdate(
     { _id: candidateId, projectId, meetingId, status: candidate.status },
     {
@@ -296,6 +342,16 @@ export async function updateCandidate(
   const timestamp = updated.segmentId
     ? (await TranscriptSegment.findById(updated.segmentId).select({ startMs: 1 }))?.startMs
     : undefined;
+  if (input.title !== undefined || input.description !== undefined) {
+    await queueEmbeddingRefresh({
+      projectId,
+      initiatingUserId: userId,
+      resourceId: updated._id.toString(),
+      resourceKind: "candidate",
+      title: updated.title,
+      ...(updated.description ? { description: updated.description } : {}),
+    });
+  }
   return serializeCandidate(updated, timestamp);
 }
 
@@ -309,9 +365,9 @@ export async function approveCandidate(
   let meetingCompleted = false;
   await mongoose.connection.transaction(async (session) => {
     await assertMeeting(projectId, meetingId, session);
-    const candidate = await TaskCandidate.findOne({ _id: candidateId, projectId, meetingId }).session(
-      session
-    );
+    const candidate = await TaskCandidate.findOne({ _id: candidateId, projectId, meetingId })
+      .select("+embedding")
+      .session(session);
     if (!candidate) throw new ApiError(404, "NOT_FOUND", "Task candidate was not found.");
     const columnId = await resolveTodoColumn(projectId, session);
     approved = await approveInSession(candidate, userId, columnId, session);
@@ -356,6 +412,80 @@ export async function rejectCandidate(
   return serializeCandidate(rejected, timestamp);
 }
 
+/** Returns a rejected candidate to the active review queue. */
+export async function restoreCandidate(
+  projectId: string,
+  meetingId: string,
+  candidateId: string
+): Promise<TaskCandidateResponse> {
+  let restored: TaskCandidateRecord | undefined;
+  let restoredDuplicate: DuplicateCandidateRecord | undefined;
+  let meetingReopened = false;
+  await mongoose.connection.transaction(async (session) => {
+    await assertMeeting(projectId, meetingId, session);
+    const candidate = await TaskCandidate.findOne({ _id: candidateId, projectId, meetingId }).session(
+      session
+    );
+    if (!candidate) throw new ApiError(404, "NOT_FOUND", "Task candidate was not found.");
+    if (candidate.status !== "rejected") {
+      throw new ApiError(409, "CONFLICT", "Only rejected candidates can be restored.");
+    }
+
+    const duplicate = await DuplicateCandidate.findOne({
+      projectId,
+      taskCandidateId: candidate._id,
+      resolution: "ignored"
+    }).session(session);
+    if (duplicate) {
+      duplicate.resolution = "pending";
+      duplicate.resolvedBy = undefined;
+      duplicate.resolvedAt = undefined;
+      await duplicate.save({ session });
+      candidate.status = "duplicate_pending";
+      restoredDuplicate = duplicate;
+    } else {
+      candidate.status = "pending";
+    }
+    await candidate.save({ session });
+    const result = await Meeting.updateOne(
+      { _id: meetingId, projectId, status: "completed" },
+      { $set: { status: "ready_for_review" } },
+      { session }
+    );
+    meetingReopened = result.modifiedCount === 1;
+    restored = candidate;
+  });
+  if (!restored) throw new ApiError(500, "INTERNAL_ERROR", "Candidate restore failed.");
+  const timestamp = restored.segmentId
+    ? (await TranscriptSegment.findById(restored.segmentId).select({ startMs: 1 }))?.startMs
+    : undefined;
+  if (meetingReopened) emitMeetingProgress({ meetingId, projectId, status: "ready_for_review" });
+  return serializeCandidate(restored, timestamp, restoredDuplicate);
+}
+
+/** Permanently removes a handled item from review history without deleting its approved task. */
+export async function deleteCandidate(
+  projectId: string,
+  meetingId: string,
+  candidateId: string
+): Promise<{ id: string }> {
+  await mongoose.connection.transaction(async (session) => {
+    await assertMeeting(projectId, meetingId, session);
+    const candidate = await TaskCandidate.findOne({ _id: candidateId, projectId, meetingId }).session(
+      session
+    );
+    if (!candidate) throw new ApiError(404, "NOT_FOUND", "Task candidate was not found.");
+    if (candidate.status === "pending" || candidate.status === "duplicate_pending") {
+      throw new ApiError(409, "CONFLICT", "Review or reject this candidate before removing it.");
+    }
+    await DuplicateCandidate.deleteMany({ projectId, taskCandidateId: candidate._id }).session(
+      session
+    );
+    await candidate.deleteOne({ session });
+  });
+  return { id: candidateId };
+}
+
 export async function bulkApproveCandidates(
   projectId: string,
   meetingId: string,
@@ -371,7 +501,9 @@ export async function bulkApproveCandidates(
       _id: { $in: candidateIds },
       projectId,
       meetingId
-    }).session(session);
+    })
+      .select("+embedding")
+      .session(session);
     if (candidates.length !== candidateIds.length) {
       throw new ApiError(404, "NOT_FOUND", "One or more task candidates were not found.");
     }
@@ -429,4 +561,138 @@ export async function bulkRejectCandidates(
       candidate.segmentId ? timestamps.get(candidate.segmentId.toString()) : undefined
     )
   );
+}
+
+export interface DuplicateResolutionResponse {
+  duplicate: ReturnType<typeof serializeDuplicate>;
+  candidate: TaskCandidateResponse;
+  task?: TaskResponse;
+}
+
+/** Applies one explicit human duplicate decision; no AI proposal mutates a task by itself. */
+export async function resolveDuplicate(
+  projectId: string,
+  duplicateId: string,
+  userId: string,
+  action: ResolveDuplicateInput["action"]
+): Promise<DuplicateResolutionResponse> {
+  let resolvedDuplicate: DuplicateCandidateRecord | undefined;
+  let resolvedCandidate: TaskCandidateRecord | undefined;
+  let affectedTask: TaskDocument | undefined;
+  let createdSeparate = false;
+  let sourceTimestampMs: number | undefined;
+  let meetingCompleted = false;
+
+  await mongoose.connection.transaction(async (session) => {
+    const duplicate = await DuplicateCandidate.findOne({ _id: duplicateId, projectId })
+      .select("+similarityScore")
+      .session(session);
+    if (!duplicate) throw new ApiError(404, "NOT_FOUND", "Duplicate suggestion was not found.");
+    if (duplicate.resolution !== "pending") {
+      throw new ApiError(409, "CONFLICT", "This duplicate suggestion was already resolved.");
+    }
+
+    const candidate = await TaskCandidate.findOne({
+      _id: duplicate.taskCandidateId,
+      projectId
+    })
+      .select("+embedding")
+      .session(session);
+    if (!candidate) throw new ApiError(409, "CONFLICT", "The linked candidate is missing.");
+    if (candidate.status !== "duplicate_pending") {
+      throw new ApiError(409, "CONFLICT", "The linked candidate is no longer awaiting resolution.");
+    }
+    await assertMeeting(projectId, candidate.meetingId.toString(), session);
+
+    const existingTask = await Task.findOne({
+      _id: duplicate.existingTaskId,
+      projectId
+    }).session(session);
+    if (!existingTask) throw new ApiError(409, "CONFLICT", "The existing task is missing.");
+
+    if (action === "create_separate") {
+      candidate.status = "pending";
+      const columnId = await resolveTodoColumn(projectId, session);
+      const approval = await approveInSession(candidate, userId, columnId, session);
+      affectedTask = approval.task;
+      sourceTimestampMs = approval.timestampMs;
+      duplicate.resolution = "created_separate";
+      createdSeparate = true;
+    } else if (action === "ignore") {
+      candidate.status = "rejected";
+      await candidate.save({ session });
+      duplicate.resolution = "ignored";
+    } else {
+      await assertCanWorkOnTask(projectId, userId, existingTask, session);
+      if (duplicate.differences.title) existingTask.title = candidate.title;
+      if (duplicate.differences.priority) existingTask.priority = candidate.suggestedPriority;
+      if (duplicate.differences.dueDate) {
+        existingTask.dueDate = candidate.suggestedDueDate;
+      }
+      if (duplicate.differences.assigneeId) {
+        if (candidate.suggestedAssigneeId) {
+          await assertAssignee(projectId, candidate.suggestedAssigneeId.toString(), session);
+        }
+        existingTask.assigneeIds = candidate.suggestedAssigneeId ? [candidate.suggestedAssigneeId] : [];
+        existingTask.assigneeId = undefined;
+      }
+      if (candidate.embedding) existingTask.embedding = candidate.embedding;
+      await existingTask.save({ session });
+      await TaskActivity.create(
+        [
+          {
+            projectId,
+            taskId: existingTask._id,
+            actorId: userId,
+            actorType: "user",
+            type: "duplicate_resolved",
+            fromValue: { duplicateId: duplicate._id.toString() },
+            toValue: {
+              action: "update_existing",
+              candidateId: candidate._id.toString(),
+              meetingId: candidate.meetingId.toString(),
+              ...(candidate.segmentId ? { segmentId: candidate.segmentId.toString() } : {}),
+              quote: candidate.sourceQuote,
+              differences: duplicate.differences
+            }
+          }
+        ],
+        { session }
+      );
+      candidate.status = "approved";
+      candidate.createdTaskId = existingTask._id;
+      await candidate.save({ session });
+      duplicate.resolution = "updated_existing";
+      affectedTask = existingTask;
+    }
+
+    duplicate.resolvedBy = new mongoose.Types.ObjectId(userId);
+    duplicate.resolvedAt = new Date();
+    await duplicate.save({ session });
+    meetingCompleted = await completeMeetingWhenReviewed(candidate.meetingId, session);
+    resolvedDuplicate = duplicate;
+    resolvedCandidate = candidate;
+  });
+
+  if (!resolvedDuplicate || !resolvedCandidate) {
+    throw new ApiError(500, "INTERNAL_ERROR", "Duplicate resolution failed.");
+  }
+  if (affectedTask) {
+    const taskResponse = serializeTask(affectedTask);
+    if (createdSeparate) emitTaskCreated(projectId, taskResponse);
+    else emitTaskUpdated(projectId, taskResponse);
+  }
+  if (meetingCompleted) {
+    emitMeetingProgress({
+      meetingId: resolvedCandidate.meetingId.toString(),
+      projectId,
+      status: "completed"
+    });
+  }
+
+  return {
+    duplicate: serializeDuplicate(resolvedDuplicate),
+    candidate: serializeCandidate(resolvedCandidate, sourceTimestampMs, resolvedDuplicate),
+    ...(affectedTask ? { task: serializeTask(affectedTask) } : {})
+  };
 }

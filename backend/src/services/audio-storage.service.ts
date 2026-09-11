@@ -1,6 +1,13 @@
-import { randomUUID } from "node:crypto";
+import { createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  PutObjectCommand,
+  S3Client
+} from "@aws-sdk/client-s3";
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { env } from "../config/env";
 import { ApiError } from "../utils/ApiError";
 
@@ -19,6 +26,26 @@ export interface StoredAudio {
   originalName: string;
   mimeType: string;
   sizeBytes: number;
+}
+
+let s3Client: S3Client | undefined;
+
+function getS3(): { client: S3Client; bucket: string } {
+  if (!env.S3_BUCKET || !env.S3_ACCESS_KEY_ID || !env.S3_SECRET_ACCESS_KEY) {
+    throw new Error(
+      "S3_BUCKET, S3_ACCESS_KEY_ID, and S3_SECRET_ACCESS_KEY are required for S3 audio storage."
+    );
+  }
+  s3Client ??= new S3Client({
+    region: env.S3_REGION,
+    ...(env.S3_ENDPOINT ? { endpoint: env.S3_ENDPOINT } : {}),
+    forcePathStyle: env.S3_FORCE_PATH_STYLE,
+    credentials: {
+      accessKeyId: env.S3_ACCESS_KEY_ID,
+      secretAccessKey: env.S3_SECRET_ACCESS_KEY
+    }
+  });
+  return { client: s3Client, bucket: env.S3_BUCKET };
 }
 
 /** Removes path components and control characters while retaining a useful display name. */
@@ -64,8 +91,19 @@ export async function storeAudio(file: Express.Multer.File): Promise<StoredAudio
   const type = AUDIO_TYPES[file.mimetype as keyof typeof AUDIO_TYPES];
   if (!type) throw new ApiError(400, "INVALID_AUDIO", "Upload an MP3, WAV, or M4A file.");
   const storageKey = `${randomUUID()}${type.extension}`;
-  await mkdir(path.resolve(env.AUDIO_STORAGE_DIR), { recursive: true });
-  await writeFile(resolveStoragePath(storageKey), file.buffer, { flag: "wx" });
+  if (env.AUDIO_STORAGE_PROVIDER === "s3") {
+    const { client, bucket } = getS3();
+    await client.send(new PutObjectCommand({
+      Bucket: bucket,
+      Key: storageKey,
+      Body: file.buffer,
+      ContentType: file.mimetype,
+      Metadata: { originalName: sanitizeAudioFilename(file.originalname) }
+    }));
+  } else {
+    await mkdir(path.resolve(env.AUDIO_STORAGE_DIR), { recursive: true });
+    await writeFile(resolveStoragePath(storageKey), file.buffer, { flag: "wx" });
+  }
   return {
     storageKey,
     originalName: sanitizeAudioFilename(file.originalname),
@@ -75,6 +113,13 @@ export async function storeAudio(file: Express.Multer.File): Promise<StoredAudio
 }
 
 export async function loadAudio(storageKey: string): Promise<Buffer> {
+  resolveStoragePath(storageKey);
+  if (env.AUDIO_STORAGE_PROVIDER === "s3") {
+    const { client, bucket } = getS3();
+    const result = await client.send(new GetObjectCommand({ Bucket: bucket, Key: storageKey }));
+    if (!result.Body) throw new ApiError(404, "NOT_FOUND", "Meeting audio was not found.");
+    return Buffer.from(await result.Body.transformToByteArray());
+  }
   try {
     return await readFile(resolveStoragePath(storageKey));
   } catch (error: unknown) {
@@ -86,9 +131,63 @@ export async function loadAudio(storageKey: string): Promise<Buffer> {
 }
 
 export async function deleteAudio(storageKey: string): Promise<void> {
+  resolveStoragePath(storageKey);
+  if (env.AUDIO_STORAGE_PROVIDER === "s3") {
+    const { client, bucket } = getS3();
+    await client.send(new DeleteObjectCommand({ Bucket: bucket, Key: storageKey }));
+    return;
+  }
   await unlink(resolveStoragePath(storageKey)).catch((error: unknown) => {
     if (!(typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT")) {
       throw error;
     }
   });
+}
+
+function audioSignature(storageKey: string, expiresAt: number): string {
+  return createHmac("sha256", env.AUDIO_SIGNING_SECRET ?? env.JWT_ACCESS_SECRET)
+    .update(`${storageKey}:${expiresAt}`)
+    .digest("hex");
+}
+
+/** Creates a short-lived URL the independently deployed Python worker can fetch. */
+export async function createSignedAudioUrl(
+  storageKey: string,
+  lifetimeSeconds = 3_600
+): Promise<string> {
+  resolveStoragePath(storageKey);
+  if (env.AUDIO_STORAGE_PROVIDER === "s3") {
+    const { client, bucket } = getS3();
+    return getSignedUrl(
+      client,
+      new GetObjectCommand({ Bucket: bucket, Key: storageKey }),
+      { expiresIn: lifetimeSeconds }
+    );
+  }
+  const expiresAt = Math.floor(Date.now() / 1_000) + lifetimeSeconds;
+  const url = new URL(`/api/media/audio/${storageKey}`, env.API_PUBLIC_URL);
+  url.searchParams.set("expires", String(expiresAt));
+  url.searchParams.set("signature", audioSignature(storageKey, expiresAt));
+  return url.toString();
+}
+
+/** Verifies expiry and signature before serving worker-only audio bytes. */
+export function verifySignedAudioUrl(
+  storageKey: string,
+  expiresValue: unknown,
+  signatureValue: unknown
+): void {
+  resolveStoragePath(storageKey);
+  const expiresAt = typeof expiresValue === "string" ? Number(expiresValue) : Number.NaN;
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= Math.floor(Date.now() / 1_000)) {
+    throw new ApiError(403, "FORBIDDEN", "This audio link has expired.");
+  }
+  if (typeof signatureValue !== "string" || !/^[a-f\d]{64}$/i.test(signatureValue)) {
+    throw new ApiError(403, "FORBIDDEN", "This audio link is invalid.");
+  }
+  const provided = Buffer.from(signatureValue, "hex");
+  const expected = Buffer.from(audioSignature(storageKey, expiresAt), "hex");
+  if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) {
+    throw new ApiError(403, "FORBIDDEN", "This audio link is invalid.");
+  }
 }

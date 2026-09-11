@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Check, Loader2, Mic, Pencil, X } from "lucide-react";
+import { Check, GitBranch, Loader2, Mic, Pencil, RotateCcw, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -26,41 +26,63 @@ import { Tag } from "./primitives";
 export function DuplicateNotice({
   candidate,
   existing,
+  canUpdateExisting,
   onResolve,
 }: {
   candidate: Candidate;
-  existing: Task;
+  existing?: Task | undefined;
+  canUpdateExisting: boolean;
   onResolve: (action: "update" | "separate" | "ignore") => void;
 }) {
   return (
-    <div className="mt-3 rounded-lg border border-warning/40 bg-warning/8 p-3">
-      <div className="flex items-center gap-2">
-        <span className="text-[13px] font-semibold">Possible existing task</span>
-        <Tag tone="warning">
-          {candidate.duplicateOf?.confidence === "high" ? "High confidence" : "Worth checking"}
-        </Tag>
+    <div className="mt-3 rounded-lg border border-warning/55 bg-warning/10 p-3">
+      <div className="flex items-center gap-1.5 text-warning">
+        <GitBranch className="size-3.5" />
+        <span className="text-[13px] font-semibold text-foreground">Possible existing task</span>
       </div>
-      <dl className="mt-2.5 grid gap-1.5 text-[13px] sm:grid-cols-2">
-        <div>
-          <dt className="meta-text">Candidate</dt>
-          <dd>{candidate.title}</dd>
-          <dd className="meta-text">Meeting suggests {formatDate(candidate.due)}</dd>
-        </div>
-        <div>
-          <dt className="meta-text">Existing task</dt>
-          <dd>{existing.title}</dd>
-          <dd className="meta-text">Existing deadline {formatDate(existing.due)}</dd>
-        </div>
-      </dl>
+      <div className="mt-1.5 space-y-1 text-[12.5px] text-muted-foreground">
+        <p>
+          Existing task:{" "}
+          <strong className="font-semibold text-foreground">
+            {existing?.title ?? "Existing task"}
+          </strong>
+        </p>
+        <p>
+          Similarity:{" "}
+          {candidate.duplicateOf?.confidence === "high" ? "High confidence" : "Worth checking"}
+        </p>
+        <p className="pt-1">
+          Deadline: existing{" "}
+          {formatDate(existing?.due ?? candidate.duplicateOf?.existingDue ?? null)} · meeting
+          suggests {formatDate(candidate.due)}
+        </p>
+        <p>
+          Priority: existing {existing ? priorityLabel[existing.priority] : "Unknown"} · meeting
+          suggests {priorityLabel[candidate.priority]}
+        </p>
+      </div>
       <div className="mt-3 flex flex-wrap gap-2">
-        <Button size="sm" onClick={() => onResolve("update")}>
+        <Button
+          size="sm"
+          variant="outline"
+          disabled={!canUpdateExisting}
+          title={
+            canUpdateExisting ? undefined : "Only an owner, admin, or assignee can update this task"
+          }
+          onClick={() => onResolve("update")}
+        >
           Update existing
         </Button>
-        <Button size="sm" variant="outline" onClick={() => onResolve("separate")}>
+        <Button size="sm" onClick={() => onResolve("separate")}>
           Create separate task
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => onResolve("ignore")}>
-          Ignore candidate
+        <Button
+          size="sm"
+          variant="ghost"
+          className="text-muted-foreground"
+          onClick={() => onResolve("ignore")}
+        >
+          Ignore
         </Button>
       </div>
     </div>
@@ -75,8 +97,11 @@ export function ReviewTaskCard({
   onSelect,
   onApprove,
   onReject,
+  onRestore,
+  onDelete,
   onEdit,
   onResolveDuplicate,
+  canUpdateExisting,
   members,
 }: {
   candidate: Candidate;
@@ -86,14 +111,18 @@ export function ReviewTaskCard({
   onSelect: (v: boolean) => void;
   onApprove: () => Promise<void> | void;
   onReject: () => Promise<void> | void;
+  onRestore: () => Promise<void> | void;
+  onDelete: () => void;
   onEdit: (patch: Partial<Candidate>) => void;
   onResolveDuplicate: (action: "update" | "separate" | "ignore") => void;
+  canUpdateExisting: boolean;
   members: Member[];
 }) {
   const [editing, setEditing] = useState(false);
   const [busy, setBusy] = useState(false);
   const approved = candidate.state === "approved";
   const rejected = candidate.state === "rejected";
+  const duplicatePending = candidate.state === "duplicate_pending";
 
   async function approve() {
     setBusy(true);
@@ -117,7 +146,7 @@ export function ReviewTaskCard({
         <Checkbox
           checked={selected}
           onCheckedChange={(v) => onSelect(!!v)}
-          disabled={approved || rejected}
+          disabled={approved || rejected || duplicatePending}
           aria-label={`Select ${candidate.title}`}
           className="mt-0.5"
         />
@@ -209,21 +238,57 @@ export function ReviewTaskCard({
             </blockquote>
           </div>
 
-          {candidate.duplicateOf && existing && !approved && !rejected ? (
+          {candidate.duplicateOf && !approved && !rejected ? (
             <DuplicateNotice
               candidate={candidate}
               existing={existing}
+              canUpdateExisting={canUpdateExisting}
               onResolve={onResolveDuplicate}
             />
           ) : null}
 
           <div className="mt-3 flex flex-wrap items-center gap-2">
             {approved ? (
-              <span className="inline-flex items-center gap-1.5 text-[13px] text-success">
-                <Check className="size-4" /> Added to the board
-              </span>
+              <>
+                <span className="inline-flex items-center gap-1.5 text-[13px] text-success">
+                  <Check className="size-4" /> Added to the board
+                </span>
+                <Button size="sm" variant="ghost" className="ml-auto" onClick={onDelete}>
+                  <Trash2 className="size-4" /> Remove from history
+                </Button>
+              </>
             ) : rejected ? (
-              <span className="text-[13px] text-muted-foreground">Kept for review history</span>
+              <>
+                <span className="text-[13px] text-muted-foreground">Kept for review history</span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await onRestore();
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {busy ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="size-4" />
+                  )}
+                  Restore
+                </Button>
+                <Button size="sm" variant="ghost" onClick={onDelete}>
+                  <Trash2 className="size-4" /> Remove
+                </Button>
+              </>
+            ) : duplicatePending ? (
+              <span className="text-[13px] text-muted-foreground">
+                Choose what to do with the possible duplicate above.
+              </span>
             ) : (
               <>
                 <Button size="sm" onClick={approve} disabled={busy}>

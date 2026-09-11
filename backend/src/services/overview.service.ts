@@ -2,6 +2,7 @@ import { Membership } from "../models/Membership.model";
 import { Project, type KanbanColumn } from "../models/Project.model";
 import { Task } from "../models/Task.model";
 import { TaskActivity, type TaskActivityDocument } from "../models/TaskActivity.model";
+import { User } from "../models/User.model";
 import { ApiError } from "../utils/ApiError";
 
 export interface ColumnCount {
@@ -23,6 +24,8 @@ export interface RecentActivityEntry {
   actorId?: string;
   actorType: string;
   type: string;
+  taskTitle?: string;
+  actorName?: string;
   createdAt: Date;
 }
 
@@ -36,13 +39,23 @@ export interface ProjectOverviewResponse {
 }
 
 /** Serializes a TaskActivity document into a lightweight recent-activity entry. */
-function serializeRecentActivity(activity: TaskActivityDocument): RecentActivityEntry {
+function serializeRecentActivity(
+  activity: TaskActivityDocument,
+  taskTitles: Map<string, string>,
+  actorNames: Map<string, string>,
+): RecentActivityEntry {
   return {
     id: activity._id.toString(),
     taskId: activity.taskId.toString(),
     ...(activity.actorId ? { actorId: activity.actorId.toString() } : {}),
     actorType: activity.actorType,
     type: activity.type,
+    ...(taskTitles.get(activity.taskId.toString())
+      ? { taskTitle: taskTitles.get(activity.taskId.toString()) }
+      : {}),
+    ...(activity.actorId && actorNames.get(activity.actorId.toString())
+      ? { actorName: actorNames.get(activity.actorId.toString()) }
+      : {}),
     createdAt: activity.createdAt
   };
 }
@@ -100,6 +113,18 @@ export async function getProjectOverview(projectId: string): Promise<ProjectOver
   }));
 
   const totalTasks = byColumn.reduce((sum, entry) => sum + entry.count, 0);
+  const [activityTasks, activityUsers] = await Promise.all([
+    Task.find({ _id: { $in: recentActivity.map((entry) => entry.taskId) } })
+      .select({ title: 1 })
+      .lean(),
+    User.find({
+      _id: { $in: recentActivity.flatMap((entry) => (entry.actorId ? [entry.actorId] : [])) },
+    })
+      .select({ name: 1 })
+      .lean(),
+  ]);
+  const taskTitles = new Map(activityTasks.map((task) => [task._id.toString(), task.title]));
+  const actorNames = new Map(activityUsers.map((user) => [user._id.toString(), user.name]));
 
   return {
     totalTasks,
@@ -107,6 +132,8 @@ export async function getProjectOverview(projectId: string): Promise<ProjectOver
     byCategory,
     overdueCount,
     memberCount,
-    recentActivity: recentActivity.map(serializeRecentActivity)
+    recentActivity: recentActivity.map((entry) =>
+      serializeRecentActivity(entry, taskTitles, actorNames),
+    )
   };
 }

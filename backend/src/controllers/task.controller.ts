@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import * as taskService from "../services/task.service";
 import { ApiError } from "../utils/ApiError";
 import type {
+  CreateTaskCommentInput,
   CreateTaskInput,
   ListTasksQuery,
   UpdateTaskInput
@@ -79,4 +80,23 @@ export async function listTaskActivity(request: Request, response: Response): Pr
   const context = getTaskContext(request);
   const activity = await taskService.listTaskActivity(context.projectId, getTaskId(request));
   response.json({ success: true, data: activity });
+}
+
+/** Lists comments for a task visible to the current project member. */
+export async function listTaskComments(request: Request, response: Response): Promise<void> {
+  const context = getTaskContext(request);
+  const comments = await taskService.listTaskComments(context.projectId, getTaskId(request));
+  response.json({ success: true, data: comments });
+}
+
+/** Adds a comment after the service checks leader/assignee permission. */
+export async function createTaskComment(request: Request, response: Response): Promise<void> {
+  const context = getTaskContext(request);
+  const comment = await taskService.createTaskComment(
+    context.projectId,
+    getTaskId(request),
+    context.userId,
+    request.body as CreateTaskCommentInput
+  );
+  response.status(201).json({ success: true, data: comment });
 }

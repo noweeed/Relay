@@ -26,13 +26,17 @@ class GroqTaskExtractor:
         api_key: str,
         model: str = "qwen/qwen3.8-27b",
         timeout_seconds: float = 60,
+        max_completion_tokens: int = 800,
         client: Any | None = None,
     ) -> None:
         if not api_key.strip():
             raise ValueError("GROQ_API_KEY is required")
         if not model.strip():
             raise ValueError("GROQ_MODEL is required")
+        if max_completion_tokens < 1:
+            raise ValueError("max_completion_tokens must be positive")
         self._model = model.strip()
+        self._max_completion_tokens = max_completion_tokens
         self._owns_client = client is None
         self._client = client or AsyncGroq(api_key=api_key, timeout=timeout_seconds)
 
@@ -50,6 +54,7 @@ class GroqTaskExtractor:
         response = await self._client.chat.completions.create(
             model=self._model,
             temperature=0,
+            max_completion_tokens=self._max_completion_tokens,
             response_format={"type": "json_object"},
             messages=[
                 {"role": "system", "content": TASK_EXTRACTION_SYSTEM_PROMPT},
@@ -74,7 +79,12 @@ class GroqTaskExtractor:
         result = MeetingExtractionResult.model_validate_json(content)
         if result.meeting_id != payload.meeting_id:
             raise ValueError("Groq response meetingId does not match the requested meeting")
-        return result.tasks
+        # Extraction is not trusted to create embeddings or duplicate matches; dedicated
+        # graph nodes own those fields after evidence validation.
+        return [
+            task.model_copy(update={"embedding": None, "duplicate": None}, deep=True)
+            for task in result.tasks
+        ]
 
     async def close(self) -> None:
         """Close only the Groq client created internally by this adapter."""

@@ -16,6 +16,7 @@ class FakeRedis:
         self.added: list[tuple[str, dict[str, Any]]] = []
         self.acks: list[tuple[str, str, str]] = []
         self.groups: list[tuple[str, str, str, bool]] = []
+        self.claims: list[tuple[str, str, str, int, list[str], bool]] = []
 
     def ping(self) -> bool:
         return True
@@ -48,6 +49,19 @@ class FakeRedis:
     def xack(self, stream: str, group: str, stream_id: str) -> int:
         self.acks.append((stream, group, stream_id))
         return 1
+
+    def xclaim(
+        self,
+        stream: str,
+        group: str,
+        consumer: str,
+        minimum_idle: int,
+        message_ids: list[str],
+        *,
+        justid: bool,
+    ) -> list[str]:
+        self.claims.append((stream, group, consumer, minimum_idle, message_ids, justid))
+        return message_ids
 
     def close(self) -> None:
         return None
@@ -145,6 +159,17 @@ def test_malformed_group_job_can_be_dead_lettered() -> None:
     assert dead_id == "1710000000001-0"
     assert deliveries[0].envelope is None
     assert fake.added[0][0] == "relay:ai:dead-letter"
+
+
+def test_renews_active_job_ownership() -> None:
+    fake = FakeRedis()
+    transport = RedisTransport(fake, settings())  # type: ignore[arg-type]
+
+    transport.renew_job("1710000000000-0", "worker-1")
+
+    assert fake.claims == [
+        ("relay:ai:jobs", "relay-ai-workers", "worker-1", 0, ["1710000000000-0"], True)
+    ]
 
 
 def json_job() -> str:

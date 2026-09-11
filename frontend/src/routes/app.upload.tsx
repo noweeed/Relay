@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
-import { FileAudio, Loader2, Upload } from "lucide-react";
-import { PageHeader } from "@/components/relay/primitives";
+import { FileAudio, Loader2, ShieldAlert, Upload } from "lucide-react";
+import { EmptyState, PageHeader } from "@/components/relay/primitives";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,7 +13,7 @@ import { useRelay } from "@/lib/relay-store";
 export const Route = createFileRoute("/app/upload")({
   head: () => ({
     meta: [
-      { title: "Add meeting | Relay" },
+      { title: "Relay" },
       {
         name: "description",
         content: "Paste a meeting transcript and save its parsed conversation in Relay.",
@@ -33,6 +33,7 @@ function UploadPage() {
   const [error, setError] = useState<string | null>(null);
   const [audioFile, setAudioFile] = useState<File | null>(null);
   const audioInput = useRef<HTMLInputElement>(null);
+  const canAddMeeting = activeProject?.role === "owner" || activeProject?.role === "admin";
 
   /** Validates the form, persists the transcript, then opens its parsed segments. */
   async function handleSubmit() {
@@ -68,6 +69,26 @@ function UploadPage() {
     } finally {
       setSubmitting(false);
     }
+  }
+
+  if (activeProject && !canAddMeeting) {
+    return (
+      <>
+        <PageHeader title="Add meeting" description="Add a transcript or meeting audio." />
+        <div className="px-6 py-8 md:px-8">
+          <EmptyState
+            icon={ShieldAlert}
+            title="Owner or admin access required"
+            description="Only project owners and admins can add meeting transcripts or audio."
+            actions={
+              <Button variant="outline" onClick={() => void navigate({ to: "/app/meetings" })}>
+                Back to meetings
+              </Button>
+            }
+          />
+        </div>
+      </>
+    );
   }
 
   return (

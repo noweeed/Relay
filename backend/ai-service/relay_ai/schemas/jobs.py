@@ -8,7 +8,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 class JobType(StrEnum):
     MEETING_PROCESS = "meeting.process"
     MEETING_REPROCESS = "meeting.reprocess"
+    MEETING_TRANSCRIBE = "meeting.transcribe"
     COMMAND_INTERPRET = "command.interpret"
+    CONTENT_EMBED = "content.embed"
 
 
 class JobEnvelope(BaseModel):

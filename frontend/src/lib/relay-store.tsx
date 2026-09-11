@@ -8,10 +8,9 @@ import {
   type ReactNode,
 } from "react";
 import {
-  initialNotifications,
-  initialTasks,
   type ActivityEntry,
   type Candidate,
+  type DashboardActivity,
   type Meeting,
   type KanbanColumn,
   type Member,
@@ -20,15 +19,17 @@ import {
   type Project,
   type Status,
   type Task,
+  type TaskComment,
   type TranscriptSegment,
 } from "./relay-data";
 import { apiErrorMessage, apiRequest, getAccessToken } from "./api-client";
 import { createRelaySocket, type MeetingProgressEvent } from "./relay-socket";
+import { toast } from "sonner";
 
 type NewTask = {
   title: string;
   description: string;
-  assigneeId: string | null;
+  assigneeIds: string[];
   due: string | null;
   priority: Priority;
   columnId: string;
@@ -41,6 +42,7 @@ type ApiTask = {
   projectId: string;
   title: string;
   description?: string;
+  assigneeIds: string[];
   assigneeId?: string;
   dueDate?: string;
   priority: Priority;
@@ -99,6 +101,13 @@ type ApiCandidate = {
   sourceTimestampMs?: number;
   status: Candidate["state"];
   createdTaskId?: string;
+  duplicate?: {
+    id: string;
+    existingTaskId: string;
+    similarityLabel: "high" | "medium";
+    differences: Record<string, { existing?: unknown; candidate?: unknown }>;
+    resolution: "pending" | "updated_existing" | "created_separate" | "ignored";
+  };
 };
 
 function mapApiCandidate(candidate: ApiCandidate): Candidate {
@@ -117,6 +126,20 @@ function mapApiCandidate(candidate: ApiCandidate): Candidate {
     quote: candidate.sourceQuote,
     state: candidate.status,
     ...(candidate.createdTaskId ? { createdTaskId: candidate.createdTaskId } : {}),
+    ...(candidate.duplicate?.resolution === "pending"
+      ? {
+          duplicateOf: {
+            id: candidate.duplicate.id,
+            taskId: candidate.duplicate.existingTaskId,
+            confidence: candidate.duplicate.similarityLabel,
+            existingDue:
+              typeof candidate.duplicate.differences["dueDate"]?.existing === "string"
+                ? candidate.duplicate.differences["dueDate"].existing.slice(0, 10)
+                : null,
+            differences: candidate.duplicate.differences,
+          },
+        }
+      : {}),
   };
 }
 
@@ -177,15 +200,108 @@ type ApiTaskActivity = {
     | "created"
     | "extracted"
     | "approved"
+    | "title_changed"
+    | "description_changed"
     | "column_changed"
     | "assignee_changed"
     | "priority_changed"
     | "deadline_changed"
-    | "duplicate_resolved";
+    | "duplicate_resolved"
+    | "commented";
+  actorName?: string;
   fromValue?: unknown;
   toValue?: unknown;
   createdAt: string;
 };
+
+type ApiTaskComment = {
+  id: string;
+  authorId: string;
+  authorName: string;
+  body: string;
+  createdAt: string;
+};
+
+type ApiOverview = {
+  recentActivity: Array<
+    ApiTaskActivity & {
+      taskId: string;
+      actorId?: string;
+      taskTitle?: string;
+      actorName?: string;
+    }
+  >;
+};
+
+type ApiNotification = {
+  id: string;
+  projectId?: string;
+  type:
+    | "deadline_upcoming"
+    | "task_overdue"
+    | "meeting_ready_for_review"
+    | "task_assigned"
+    | "duplicate_detected";
+  title: string;
+  body: string;
+  readAt?: string;
+  createdAt: string;
+};
+
+/** Replaces machine ISO timestamps in persisted notification copy with readable UTC dates. */
+function formatNotificationBody(body: string): string {
+  return body.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z\b/g, (value) => {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime())
+      ? value
+      : date.toLocaleDateString("en-US", {
+          month: "short",
+          day: "numeric",
+          year: "numeric",
+          timeZone: "UTC",
+        });
+  });
+}
+
+function mapApiNotification(notification: ApiNotification): Notification {
+  return {
+    id: notification.id,
+    kind:
+      notification.type === "task_overdue"
+        ? "overdue"
+        : notification.type === "deadline_upcoming"
+          ? "deadline"
+          : "review",
+    title: notification.title,
+    body: formatNotificationBody(notification.body),
+    at: new Date(notification.createdAt).toLocaleString(),
+    read: Boolean(notification.readAt),
+  };
+}
+
+function mapOverviewActivity(entry: ApiOverview["recentActivity"][number]): DashboardActivity {
+  const task = entry.taskTitle ? ` “${entry.taskTitle}”` : "";
+  const labels: Record<ApiTaskActivity["type"], string> = {
+    created: `created${task}`,
+    extracted: `extracted${task} from a meeting`,
+    approved: `approved${task}`,
+    title_changed: `changed the title of${task}`,
+    description_changed: `changed the description of${task}`,
+    column_changed: `moved${task}`,
+    assignee_changed: `changed the assignee for${task}`,
+    priority_changed: `changed the priority for${task}`,
+    deadline_changed: `changed the deadline for${task}`,
+    duplicate_resolved: `resolved a duplicate for${task}`,
+    commented: `commented on${task}`,
+  };
+  return {
+    id: entry.id,
+    text: labels[entry.type],
+    at: new Date(entry.createdAt).toLocaleString(),
+    ...(entry.actorId ? { actorId: entry.actorId } : {}),
+    ...(entry.actorName ? { actorName: entry.actorName } : {}),
+  };
+}
 
 /** Converts a backend task into the presentation model shared by Relay screens. */
 function mapApiTask(
@@ -194,14 +310,18 @@ function mapApiTask(
   members: Member[],
 ): Task {
   const category = columns.find((column) => column.id === task.columnId)?.category ?? "todo";
-  const assignee = members.find((member) => member.id === task.assigneeId);
+  const assigneeIds = task.assigneeIds ?? (task.assigneeId ? [task.assigneeId] : []);
+  const assigneeNames = assigneeIds.flatMap((id) => {
+    const member = members.find((entry) => entry.id === id);
+    return member ? [member.name] : [];
+  });
   return {
     id: task.id,
     projectId: task.projectId,
     title: task.title,
     description: task.description ?? "",
-    assigneeId: task.assigneeId ?? null,
-    ...(assignee ? { assigneeName: assignee.name } : {}),
+    assigneeIds,
+    assigneeNames,
     due: task.dueDate ? task.dueDate.slice(0, 10) : null,
     priority: task.priority,
     status: category,
@@ -229,14 +349,25 @@ type Ctx = {
   activeProject: Project | null;
   setActiveProjectId: (id: string) => void;
   createProject: (name: string, description: string) => Promise<Project>;
+  updateProject: (name: string, description: string) => Promise<Project>;
+  deleteProject: () => Promise<void>;
   createKanbanColumn: (column: NewKanbanColumn) => Promise<KanbanColumn>;
-  inviteProjectMember: (email: string, teamRole: string) => Promise<Member>;
+  updateKanbanColumn: (columnId: string, patch: NewKanbanColumn) => Promise<KanbanColumn>;
+  reorderKanbanColumns: (columnIds: string[]) => Promise<KanbanColumn[]>;
+  deleteKanbanColumn: (columnId: string, moveTasksToColumnId?: string) => Promise<void>;
+  inviteProjectMember: (
+    email: string,
+    teamRole: string,
+    accessRole: "admin" | "member",
+  ) => Promise<Member>;
   updateProjectMemberTeamRole: (userId: string, teamRole: string) => Promise<Member>;
+  removeProjectMember: (userId: string) => Promise<void>;
   transferProjectOwnership: (userId: string) => Promise<void>;
   members: Member[];
   tasks: Task[];
   tasksLoading: boolean;
   tasksError: string | null;
+  refreshBoard: () => void;
   meetings: Meeting[];
   meetingsLoading: boolean;
   meetingsError: string | null;
@@ -244,11 +375,14 @@ type Ctx = {
   candidatesLoading: boolean;
   candidatesError: string | null;
   notifications: Notification[];
+  recentActivity: DashboardActivity[];
   addTask: (task: NewTask) => Promise<Task>;
-  updateTask: (id: string, patch: Partial<Task>, activityText?: string) => Promise<Task>;
+  updateTask: (id: string, patch: Partial<Task>) => Promise<Task>;
   moveTask: (id: string, columnId: string) => Promise<Task>;
   deleteTask: (id: string) => Promise<void>;
   loadTaskActivity: (id: string) => Promise<ActivityEntry[]>;
+  loadTaskComments: (id: string) => Promise<TaskComment[]>;
+  addTaskComment: (id: string, body: string) => Promise<TaskComment>;
   createTranscriptMeeting: (title: string, transcript: string) => Promise<Meeting>;
   createAudioMeeting: (title: string, audio: File) => Promise<Meeting>;
   loadMeeting: (meetingId: string) => Promise<Meeting>;
@@ -258,18 +392,17 @@ type Ctx = {
   updateCandidate: (id: string, patch: Partial<Candidate>) => Promise<Candidate>;
   approveCandidate: (id: string) => Promise<void>;
   rejectCandidate: (id: string) => Promise<void>;
+  restoreCandidate: (id: string) => Promise<void>;
+  deleteCandidate: (id: string) => Promise<void>;
   bulkApproveCandidates: (ids: string[]) => Promise<void>;
   bulkRejectCandidates: (ids: string[]) => Promise<void>;
-  resolveDuplicate: (id: string, action: "update" | "separate" | "ignore") => void;
-  markAllRead: () => void;
-  toggleRead: (id: string) => void;
+  resolveDuplicate: (id: string, action: "update" | "separate" | "ignore") => Promise<void>;
+  markAllRead: () => Promise<void>;
+  toggleRead: (id: string) => Promise<void>;
   unreadCount: number;
 };
 
 const RelayContext = createContext<Ctx | null>(null);
-
-let seq = 100;
-const nid = (p: string) => `${p}${++seq}`;
 
 export function RelayProvider({ children }: { children: ReactNode }) {
   const [projects, setProjects] = useState<Project[]>([]);
@@ -277,7 +410,8 @@ export function RelayProvider({ children }: { children: ReactNode }) {
   const [projectsError, setProjectsError] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [projectMembers, setProjectMembers] = useState<Member[]>([]);
-  const [tasks, setTasks] = useState<Task[]>(initialTasks);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [boardRefreshVersion, setBoardRefreshVersion] = useState(0);
   const [tasksLoading, setTasksLoading] = useState(false);
   const [tasksError, setTasksError] = useState<string | null>(null);
   const [meetings, setMeetings] = useState<Meeting[]>([]);
@@ -286,9 +420,24 @@ export function RelayProvider({ children }: { children: ReactNode }) {
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [candidatesLoading, setCandidatesLoading] = useState(false);
   const [candidatesError, setCandidatesError] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<Notification[]>(initialNotifications);
+  const [notifications, setNotifications] = useState<Notification[]>([]);
+  const [recentActivity, setRecentActivity] = useState<DashboardActivity[]>([]);
 
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
+
+  useEffect(() => {
+    let active = true;
+    void apiRequest<ApiNotification[]>("/notifications")
+      .then((response) => {
+        if (active) setNotifications(response.map(mapApiNotification));
+      })
+      .catch(() => {
+        if (active) setNotifications([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   useEffect(() => {
     let active = true;
@@ -338,6 +487,7 @@ export function RelayProvider({ children }: { children: ReactNode }) {
     if (!activeProjectId || !activeProject) {
       setProjectMembers([]);
       setTasks([]);
+      setRecentActivity([]);
       setTasksLoading(false);
       return;
     }
@@ -348,14 +498,16 @@ export function RelayProvider({ children }: { children: ReactNode }) {
     async function loadBoard() {
       setTasksLoading(true);
       try {
-        const [memberResponse, taskResponse] = await Promise.all([
+        const [memberResponse, taskResponse, overviewResponse] = await Promise.all([
           apiRequest<ApiProjectMember[]>(`/projects/${projectId}/members`),
           apiRequest<ApiTask[]>(`/projects/${projectId}/tasks`),
+          apiRequest<ApiOverview>(`/projects/${projectId}/overview`),
         ]);
         if (!active) return;
         const loadedMembers = memberResponse.map(mapApiProjectMember);
         setProjectMembers(loadedMembers);
         setTasks(taskResponse.map((task) => mapApiTask(task, columns, loadedMembers)));
+        setRecentActivity(overviewResponse.recentActivity.map(mapOverviewActivity));
         setTasksError(null);
       } catch {
         if (active) setTasksError("The task board could not be loaded from the API.");
@@ -368,7 +520,7 @@ export function RelayProvider({ children }: { children: ReactNode }) {
     return () => {
       active = false;
     };
-  }, [activeProject, activeProjectId]);
+  }, [activeProject, activeProjectId, boardRefreshVersion]);
 
   useEffect(() => {
     let active = true;
@@ -426,23 +578,39 @@ export function RelayProvider({ children }: { children: ReactNode }) {
     const token = getAccessToken();
     const socket = token ? createRelaySocket(token) : undefined;
     socket?.on("connect", () => socket.emit("project:join", projectId));
+    const refreshBoard = () => {
+      if (active) setBoardRefreshVersion((version) => version + 1);
+    };
+    socket?.on("task.created", refreshBoard);
+    socket?.on("task.updated", refreshBoard);
+    socket?.on("task.deleted", refreshBoard);
+    socket?.on("notification.created", (notification: ApiNotification) => {
+      if (!active) return;
+      setNotifications((previous) => [
+        mapApiNotification(notification),
+        ...previous.filter((entry) => entry.id !== notification.id),
+      ]);
+    });
     socket?.on("meeting.progress", (event: MeetingProgressEvent) => {
       if (!active || event.projectId !== projectId) return;
       setMeetings((previous) =>
         previous.map((meeting) =>
           meeting.id === event.meetingId
-            ? {
-                ...meeting,
-                status: event.status,
-                ...(event.errorMessage
-                  ? { errorMessage: event.errorMessage }
-                  : { errorMessage: undefined }),
-              }
+            ? event.errorMessage
+              ? { ...meeting, status: event.status, errorMessage: event.errorMessage }
+              : (({ errorMessage: _errorMessage, ...rest }) => ({
+                  ...rest,
+                  status: event.status,
+                }))(meeting)
             : meeting,
         ),
       );
       if (event.status === "ready_for_review") {
         if (refreshTimer) clearTimeout(refreshTimer);
+        toast.success("Tasks are ready for review", {
+          description: "Open Review to approve, edit, or reject the extracted tasks.",
+          duration: 6_000,
+        });
         void loadMeetings();
       }
     });
@@ -464,14 +632,13 @@ export function RelayProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           title: task.title,
           ...(task.description ? { description: task.description } : {}),
-          ...(task.assigneeId ? { assigneeId: task.assigneeId } : {}),
+          assigneeIds: task.assigneeIds,
           ...(task.due ? { dueDate: task.due } : {}),
           priority: task.priority,
           columnId: task.columnId,
         }),
       });
       const mapped = mapApiTask(created, activeProject?.kanbanColumns ?? [], projectMembers);
-      mapped.activity = [{ id: nid("a"), text: "Task created manually", at: "Just now" }];
       setTasks((previous) => [mapped, ...previous]);
       return mapped;
     },
@@ -479,7 +646,7 @@ export function RelayProvider({ children }: { children: ReactNode }) {
   );
 
   const updateTask = useCallback(
-    async (id: string, patch: Partial<Task>, activityText?: string) => {
+    async (id: string, patch: Partial<Task>) => {
       if (!activeProjectId) throw new Error("Select a project before editing tasks.");
       const current = tasks.find((task) => task.id === id);
       const updated = await apiRequest<ApiTask>(`/projects/${activeProjectId}/tasks/${id}`, {
@@ -487,17 +654,14 @@ export function RelayProvider({ children }: { children: ReactNode }) {
         body: JSON.stringify({
           ...(patch.title !== undefined ? { title: patch.title } : {}),
           ...(patch.description !== undefined ? { description: patch.description || null } : {}),
-          ...(patch.assigneeId !== undefined ? { assigneeId: patch.assigneeId } : {}),
+          ...(patch.assigneeIds !== undefined ? { assigneeIds: patch.assigneeIds } : {}),
           ...(patch.due !== undefined ? { dueDate: patch.due } : {}),
           ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
           ...(patch.columnId !== undefined ? { columnId: patch.columnId } : {}),
         }),
       });
       const mapped = mapApiTask(updated, activeProject?.kanbanColumns ?? [], projectMembers);
-      mapped.activity = [
-        ...(current?.activity ?? []),
-        ...(activityText ? [{ id: nid("a"), text: activityText, at: "Just now" }] : []),
-      ];
+      mapped.activity = current?.activity ?? [];
       setTasks((previous) => previous.map((task) => (task.id === id ? mapped : task)));
       return mapped;
     },
@@ -506,10 +670,9 @@ export function RelayProvider({ children }: { children: ReactNode }) {
 
   const moveTask = useCallback(
     async (id: string, columnId: string) => {
-      const destination = activeProject?.kanbanColumns?.find((column) => column.id === columnId);
-      return updateTask(id, { columnId }, `Moved to ${destination?.name ?? "another column"}`);
+      return updateTask(id, { columnId });
     },
-    [activeProject?.kanbanColumns, updateTask],
+    [updateTask],
   );
 
   const deleteTask = useCallback(
@@ -532,28 +695,77 @@ export function RelayProvider({ children }: { children: ReactNode }) {
       const columns = activeProject?.kanbanColumns ?? [];
       const columnName = (value: unknown) =>
         columns.find((column) => column.id === value)?.name ?? String(value ?? "unknown");
+      const assigneeNames = (value: unknown) => {
+        const ids = Array.isArray(value) ? value : value ? [value] : [];
+        if (ids.length === 0) return "Unassigned";
+        return ids
+          .map((id) => projectMembers.find((member) => member.id === id)?.name ?? "Former member")
+          .join(", ");
+      };
       const activity = response.map((entry): ActivityEntry => {
         let text = "Task updated";
         if (entry.type === "created") text = "Task created";
         if (entry.type === "extracted") text = "Task extracted from a meeting";
         if (entry.type === "approved") text = "Task approved for the board";
+        if (entry.type === "title_changed") {
+          text = `Title changed from “${String(entry.fromValue)}” to “${String(entry.toValue)}”`;
+        }
+        if (entry.type === "description_changed") text = "Description changed";
         if (entry.type === "column_changed") {
           text = `Moved from ${columnName(entry.fromValue)} to ${columnName(entry.toValue)}`;
         }
-        if (entry.type === "assignee_changed") text = "Assignee changed";
+        if (entry.type === "assignee_changed") {
+          text = `Assignees changed from ${assigneeNames(entry.fromValue)} to ${assigneeNames(entry.toValue)}`;
+        }
         if (entry.type === "priority_changed") {
           text = `Priority changed from ${String(entry.fromValue)} to ${String(entry.toValue)}`;
         }
-        if (entry.type === "deadline_changed") text = "Deadline changed";
+        if (entry.type === "deadline_changed") {
+          const from = entry.fromValue
+            ? new Date(String(entry.fromValue)).toLocaleDateString()
+            : "no date";
+          const to = entry.toValue
+            ? new Date(String(entry.toValue)).toLocaleDateString()
+            : "no date";
+          text = `Deadline changed from ${from} to ${to}`;
+        }
         if (entry.type === "duplicate_resolved") text = "Possible duplicate resolved";
-        return { id: entry.id, text, at: new Date(entry.createdAt).toLocaleString() };
+        if (entry.type === "commented") text = "Added a comment";
+        return {
+          id: entry.id,
+          text,
+          at: new Date(entry.createdAt).toLocaleString(),
+          ...(entry.actorName ? { actorName: entry.actorName } : {}),
+        };
       });
       setTasks((previous) =>
         previous.map((task) => (task.id === id ? { ...task, activity } : task)),
       );
       return activity;
     },
-    [activeProject?.kanbanColumns, activeProjectId],
+    [activeProject?.kanbanColumns, activeProjectId, projectMembers],
+  );
+
+  const loadTaskComments = useCallback(
+    async (id: string) => {
+      if (!activeProjectId) return [];
+      const comments = await apiRequest<ApiTaskComment[]>(
+        `/projects/${activeProjectId}/tasks/${id}/comments`,
+      );
+      return comments.map((comment) => ({ ...comment, createdAt: comment.createdAt }));
+    },
+    [activeProjectId],
+  );
+
+  const addTaskComment = useCallback(
+    async (id: string, body: string) => {
+      if (!activeProjectId) throw new Error("Select a project before commenting.");
+      return apiRequest<ApiTaskComment>(`/projects/${activeProjectId}/tasks/${id}/comments`, {
+        method: "POST",
+        body: JSON.stringify({ body }),
+      });
+    },
+    [activeProjectId],
   );
 
   /** Creates and immediately adds a pasted-transcript meeting to the active project. */
@@ -693,10 +905,6 @@ export function RelayProvider({ children }: { children: ReactNode }) {
       );
       const approved = mapApiCandidate(response.candidate);
       const task = mapApiTask(response.task, activeProject?.kanbanColumns ?? [], projectMembers);
-      task.activity = [
-        { id: nid("a"), text: "Task extracted from meeting", at: "Just now" },
-        { id: nid("a"), text: "Approved in review", at: "Just now" },
-      ];
       setCandidates((previous) =>
         previous.map((current) => (current.id === id ? approved : current)),
       );
@@ -718,6 +926,37 @@ export function RelayProvider({ children }: { children: ReactNode }) {
       setCandidates((previous) =>
         previous.map((current) => (current.id === id ? rejected : current)),
       );
+    },
+    [activeProjectId, candidates],
+  );
+
+  const restoreCandidate = useCallback(
+    async (id: string) => {
+      if (!activeProjectId) throw new Error("Select a project before restoring candidates.");
+      const candidate = candidates.find((item) => item.id === id);
+      if (!candidate) throw new Error("The task candidate is no longer available.");
+      const response = await apiRequest<ApiCandidate>(
+        `/projects/${activeProjectId}/meetings/${candidate.meetingId}/candidates/${id}/restore`,
+        { method: "POST" },
+      );
+      const restored = mapApiCandidate(response);
+      setCandidates((previous) =>
+        previous.map((current) => (current.id === id ? restored : current)),
+      );
+    },
+    [activeProjectId, candidates],
+  );
+
+  const deleteCandidate = useCallback(
+    async (id: string) => {
+      if (!activeProjectId) throw new Error("Select a project before removing review history.");
+      const candidate = candidates.find((item) => item.id === id);
+      if (!candidate) throw new Error("The task candidate is no longer available.");
+      await apiRequest<{ id: string }>(
+        `/projects/${activeProjectId}/meetings/${candidate.meetingId}/candidates/${id}`,
+        { method: "DELETE" },
+      );
+      setCandidates((previous) => previous.filter((current) => current.id !== id));
     },
     [activeProjectId, candidates],
   );
@@ -778,33 +1017,34 @@ export function RelayProvider({ children }: { children: ReactNode }) {
   );
 
   const resolveDuplicate = useCallback(
-    (id: string, action: "update" | "separate" | "ignore") => {
+    async (id: string, action: "update" | "separate" | "ignore") => {
       const c = candidates.find((x) => x.id === id);
-      if (!c) return;
-      if (action === "update" && c.duplicateOf) {
-        void updateTask(
-          c.duplicateOf.taskId,
-          { due: c.due },
-          `Deadline updated from a later meeting to ${c.due}`,
-        );
-        setCandidates((previous) =>
-          previous.map((candidate) =>
-            candidate.id === id ? { ...candidate, state: "approved" } : candidate,
-          ),
-        );
-      } else if (action === "separate") {
-        setCandidates((prev) =>
-          prev.map((x) => {
-            if (x.id !== id) return x;
-            const { duplicateOf: _drop, ...rest } = x;
-            return rest;
-          }),
-        );
-      } else {
-        void rejectCandidate(id);
+      if (!c?.duplicateOf || !activeProjectId) {
+        throw new Error("The duplicate suggestion is no longer available.");
+      }
+      const apiAction =
+        action === "update"
+          ? "update_existing"
+          : action === "separate"
+            ? "create_separate"
+            : "ignore";
+      const response = await apiRequest<{
+        candidate: ApiCandidate;
+        task?: ApiTask;
+      }>(`/projects/${activeProjectId}/duplicates/${c.duplicateOf.id}/resolve`, {
+        method: "POST",
+        body: JSON.stringify({ action: apiAction }),
+      });
+      const resolved = mapApiCandidate(response.candidate);
+      setCandidates((previous) =>
+        previous.map((candidate) => (candidate.id === id ? resolved : candidate)),
+      );
+      if (response.task) {
+        const task = mapApiTask(response.task, activeProject?.kanbanColumns ?? [], projectMembers);
+        setTasks((previous) => [task, ...previous.filter((current) => current.id !== task.id)]);
       }
     },
-    [candidates, rejectCandidate, updateTask],
+    [activeProject?.kanbanColumns, activeProjectId, candidates, projectMembers],
   );
 
   const createProject = useCallback(async (name: string, description: string) => {
@@ -829,6 +1069,49 @@ export function RelayProvider({ children }: { children: ReactNode }) {
     setActiveProjectId(project.id);
     return project;
   }, []);
+
+  /** Persists project details and keeps the project switcher in sync. */
+  const updateProject = useCallback(
+    async (name: string, description: string) => {
+      if (!activeProjectId) throw new Error("Select a project before updating it.");
+      const response = await apiRequest<{
+        id: string;
+        name: string;
+        description?: string;
+        kanbanColumns: NonNullable<Project["kanbanColumns"]>;
+        role: NonNullable<Project["role"]>;
+      }>(`/projects/${activeProjectId}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name, description }),
+      });
+      const project: Project = {
+        id: response.id,
+        name: response.name,
+        description: response.description ?? "",
+        kanbanColumns: response.kanbanColumns,
+        role: response.role,
+      };
+      setProjects((previous) =>
+        previous.map((current) => (current.id === activeProjectId ? project : current)),
+      );
+      return project;
+    },
+    [activeProjectId],
+  );
+
+  /** Deletes the active project on the server before clearing its local state. */
+  const deleteProject = useCallback(async () => {
+    if (!activeProjectId) throw new Error("Select a project before deleting it.");
+    await apiRequest<{ deleted: boolean }>(`/projects/${activeProjectId}`, { method: "DELETE" });
+    const remaining = projects.filter((project) => project.id !== activeProjectId);
+    setProjects(remaining);
+    setActiveProjectId(remaining[0]?.id ?? null);
+    setProjectMembers([]);
+    setTasks((previous) => previous.filter((task) => task.projectId !== activeProjectId));
+    setMeetings((previous) => previous.filter((meeting) => meeting.projectId !== activeProjectId));
+    setCandidates([]);
+    setRecentActivity([]);
+  }, [activeProjectId, projects]);
 
   /** Adds a server-validated column and synchronizes the active project definition. */
   const createKanbanColumn = useCallback(
@@ -855,20 +1138,105 @@ export function RelayProvider({ children }: { children: ReactNode }) {
     [activeProjectId],
   );
 
+  /** Updates a column without changing its stable ID or task links. */
+  const updateKanbanColumn = useCallback(
+    async (columnId: string, patch: NewKanbanColumn) => {
+      if (!activeProjectId) throw new Error("Select a project before editing a column.");
+      const column = await apiRequest<KanbanColumn>(
+        `/projects/${activeProjectId}/kanban/columns/${columnId}`,
+        { method: "PATCH", body: JSON.stringify(patch) },
+      );
+      setProjects((previous) =>
+        previous.map((project) =>
+          project.id === activeProjectId
+            ? {
+                ...project,
+                kanbanColumns: (project.kanbanColumns ?? []).map((current) =>
+                  current.id === columnId ? column : current,
+                ),
+              }
+            : project,
+        ),
+      );
+      setBoardRefreshVersion((version) => version + 1);
+      return column;
+    },
+    [activeProjectId],
+  );
+
+  /** Saves the complete column order returned by the server. */
+  const reorderKanbanColumns = useCallback(
+    async (columnIds: string[]) => {
+      if (!activeProjectId) throw new Error("Select a project before reordering columns.");
+      const columns = await apiRequest<KanbanColumn[]>(
+        `/projects/${activeProjectId}/kanban/columns/order`,
+        { method: "PUT", body: JSON.stringify({ columnIds }) },
+      );
+      setProjects((previous) =>
+        previous.map((project) =>
+          project.id === activeProjectId ? { ...project, kanbanColumns: columns } : project,
+        ),
+      );
+      return columns;
+    },
+    [activeProjectId],
+  );
+
+  /** Removes a column and lets the server move its tasks when a destination is required. */
+  const deleteKanbanColumn = useCallback(
+    async (columnId: string, moveTasksToColumnId?: string) => {
+      if (!activeProjectId) throw new Error("Select a project before deleting a column.");
+      const query = moveTasksToColumnId
+        ? `?moveTasksToColumnId=${encodeURIComponent(moveTasksToColumnId)}`
+        : "";
+      await apiRequest<{ deleted: boolean }>(
+        `/projects/${activeProjectId}/kanban/columns/${columnId}${query}`,
+        { method: "DELETE" },
+      );
+      setProjects((previous) =>
+        previous.map((project) =>
+          project.id === activeProjectId
+            ? {
+                ...project,
+                kanbanColumns: (project.kanbanColumns ?? []).filter(
+                  (column) => column.id !== columnId,
+                ),
+              }
+            : project,
+        ),
+      );
+      setBoardRefreshVersion((version) => version + 1);
+    },
+    [activeProjectId],
+  );
+
   /** Adds an existing Relay user by email with a descriptive, non-security team role. */
   const inviteProjectMember = useCallback(
-    async (email: string, teamRole: string) => {
+    async (email: string, teamRole: string, accessRole: "admin" | "member") => {
       if (!activeProjectId) throw new Error("Select a project before adding a member.");
       const response = await apiRequest<ApiProjectMember>(
         `/projects/${activeProjectId}/members/invite`,
         {
           method: "POST",
-          body: JSON.stringify({ email, teamRole, role: "member" }),
+          body: JSON.stringify({ email, teamRole, role: accessRole }),
         },
       );
       const member = mapApiProjectMember(response);
       setProjectMembers((previous) => [...previous, member]);
       return member;
+    },
+    [activeProjectId],
+  );
+
+  /** Removes a member only after the server accepts the caller's role hierarchy. */
+  const removeProjectMember = useCallback(
+    async (userId: string) => {
+      if (!activeProjectId) throw new Error("Select a project before removing a member.");
+      await apiRequest<{ removed: boolean }>(`/projects/${activeProjectId}/members/${userId}`, {
+        method: "DELETE",
+      });
+      setProjectMembers((previous) => previous.filter((member) => member.id !== userId));
+      setBoardRefreshVersion((version) => version + 1);
     },
     [activeProjectId],
   );
@@ -917,14 +1285,25 @@ export function RelayProvider({ children }: { children: ReactNode }) {
     [activeProjectId],
   );
 
-  const markAllRead = useCallback(
-    () => setNotifications((prev) => prev.map((n) => ({ ...n, read: true }))),
-    [],
-  );
+  const markAllRead = useCallback(async () => {
+    await apiRequest<{ updated: number }>("/notifications/read-all", { method: "POST" });
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  }, []);
   const toggleRead = useCallback(
-    (id: string) =>
-      setNotifications((prev) => prev.map((n) => (n.id === id ? { ...n, read: !n.read } : n))),
-    [],
+    async (id: string) => {
+      const current = notifications.find((notification) => notification.id === id);
+      if (!current) return;
+      const updated = await apiRequest<ApiNotification>(`/notifications/${id}/read`, {
+        method: "PATCH",
+        body: JSON.stringify({ read: !current.read }),
+      });
+      setNotifications((prev) =>
+        prev.map((notification) =>
+          notification.id === id ? mapApiNotification(updated) : notification,
+        ),
+      );
+    },
+    [notifications],
   );
 
   const value = useMemo<Ctx>(
@@ -935,14 +1314,21 @@ export function RelayProvider({ children }: { children: ReactNode }) {
       activeProject,
       setActiveProjectId,
       createProject,
+      updateProject,
+      deleteProject,
       createKanbanColumn,
+      updateKanbanColumn,
+      reorderKanbanColumns,
+      deleteKanbanColumn,
       inviteProjectMember,
       updateProjectMemberTeamRole,
+      removeProjectMember,
       transferProjectOwnership,
       members: projectMembers,
       tasks: tasks.filter((t) => t.projectId === activeProjectId),
       tasksLoading,
       tasksError,
+      refreshBoard: () => setBoardRefreshVersion((version) => version + 1),
       meetings: meetings.filter((m) => m.projectId === activeProjectId),
       meetingsLoading,
       meetingsError,
@@ -950,11 +1336,14 @@ export function RelayProvider({ children }: { children: ReactNode }) {
       candidatesLoading,
       candidatesError,
       notifications,
+      recentActivity,
       addTask,
       updateTask,
       moveTask,
       deleteTask,
       loadTaskActivity,
+      loadTaskComments,
+      addTaskComment,
       createTranscriptMeeting,
       createAudioMeeting,
       loadMeeting,
@@ -964,6 +1353,8 @@ export function RelayProvider({ children }: { children: ReactNode }) {
       updateCandidate,
       approveCandidate,
       rejectCandidate,
+      restoreCandidate,
+      deleteCandidate,
       bulkApproveCandidates,
       bulkRejectCandidates,
       resolveDuplicate,
@@ -988,11 +1379,14 @@ export function RelayProvider({ children }: { children: ReactNode }) {
       candidatesLoading,
       candidatesError,
       notifications,
+      recentActivity,
       addTask,
       updateTask,
       moveTask,
       deleteTask,
       loadTaskActivity,
+      loadTaskComments,
+      addTaskComment,
       createTranscriptMeeting,
       createAudioMeeting,
       loadMeeting,
@@ -1002,13 +1396,21 @@ export function RelayProvider({ children }: { children: ReactNode }) {
       updateCandidate,
       approveCandidate,
       rejectCandidate,
+      restoreCandidate,
+      deleteCandidate,
       bulkApproveCandidates,
       bulkRejectCandidates,
       resolveDuplicate,
       createProject,
+      updateProject,
+      deleteProject,
       createKanbanColumn,
+      updateKanbanColumn,
+      reorderKanbanColumns,
+      deleteKanbanColumn,
       inviteProjectMember,
       updateProjectMemberTeamRole,
+      removeProjectMember,
       transferProjectOwnership,
       markAllRead,
       toggleRead,

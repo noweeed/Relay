@@ -1,4 +1,5 @@
 import { io, type Socket } from "socket.io-client";
+import { getAccessToken } from "./api-client";
 
 export type MeetingProgressEvent = {
   meetingId: string;
@@ -14,8 +15,12 @@ const socketUrl = (
 
 /** Opens an authenticated realtime connection without persisting the access token. */
 export function createRelaySocket(token: string): Socket {
-  return io(socketUrl, {
+  const socket = io(socketUrl, {
     auth: { token },
     transports: ["websocket", "polling"],
   });
+  socket.io.on("reconnect_attempt", () => {
+    socket.auth = { token: getAccessToken() ?? token };
+  });
+  return socket;
 }

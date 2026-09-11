@@ -3,6 +3,7 @@ import { useState } from "react";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { GoogleSignInButton } from "@/components/relay/google-sign-in-button";
+import { RelayBrand } from "@/components/relay/relay-brand";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { apiErrorMessage } from "@/lib/api-client";
@@ -11,7 +12,7 @@ import { useAuth } from "@/lib/auth-store";
 export const Route = createFileRoute("/login")({
   head: () => ({
     meta: [
-      { title: "Sign in | Relay" },
+      { title: "Relay" },
       {
         name: "description",
         content: "Sign in to Relay to review extracted tasks and track your project board.",
@@ -52,28 +53,18 @@ function LoginPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4 py-12">
-      <div className="w-full max-w-sm">
-        <Link to="/" className="mb-8 flex items-center justify-center gap-2">
-          <span className="flex size-6 items-center justify-center rounded-md bg-primary text-[13px] font-bold text-primary-foreground">
-            R
-          </span>
-          <span className="text-[15px] font-semibold tracking-tight">Relay</span>
+      <div className="w-full max-w-md">
+        <Link
+          to="/"
+          aria-label="Go to Relay homepage"
+          className="mx-auto mb-6 flex w-fit rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-4 focus-visible:ring-offset-background"
+        >
+          <RelayBrand />
         </Link>
-        <div className="rounded-xl border border-border bg-card p-6">
+        <div className="rounded-xl border border-border bg-card p-8">
           <h1 className="text-[20px] font-semibold">Sign in</h1>
-          <p className="mt-1 text-[13.5px] text-muted-foreground">Use your work email.</p>
-          {googleEnabled ? (
-            <>
-              <div className="mt-5">
-                <GoogleSignInButton onSuccess={() => navigate({ to: "/app" })} />
-              </div>
-              <div className="my-4 flex items-center gap-3 text-[12px] text-muted-foreground">
-                <span className="h-px flex-1 bg-border" /> or continue with email
-                <span className="h-px flex-1 bg-border" />
-              </div>
-            </>
-          ) : null}
-          <form onSubmit={submit} className="space-y-4" noValidate>
+          <p className="mt-1 text-[13.5px] text-muted-foreground">Welcome back to Relay.</p>
+          <form onSubmit={submit} className="mt-6 space-y-4" noValidate>
             <div className="space-y-1.5">
               <Label htmlFor="email">Email</Label>
               <Input
@@ -84,6 +75,7 @@ function LoginPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 aria-invalid={!!errors.email}
                 aria-describedby={errors.email ? "email-error" : undefined}
+                className="bg-transparent"
               />
               {errors.email ? (
                 <p id="email-error" className="text-[12.5px] text-destructive">
@@ -101,6 +93,7 @@ function LoginPage() {
                 onChange={(e) => setPassword(e.target.value)}
                 aria-invalid={!!errors.password}
                 aria-describedby={errors.password ? "password-error" : undefined}
+                className="bg-transparent"
               />
               {errors.password ? (
                 <p id="password-error" className="text-[12.5px] text-destructive">
@@ -119,6 +112,15 @@ function LoginPage() {
             </Button>
             {errors.form ? <p className="text-[12.5px] text-destructive">{errors.form}</p> : null}
           </form>
+          {googleEnabled ? (
+            <>
+              <div className="my-5 flex items-center gap-3 text-[12px] text-muted-foreground">
+                <span className="h-px flex-1 bg-border" /> OR CONTINUE WITH
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <GoogleSignInButton onSuccess={() => navigate({ to: "/app" })} />
+            </>
+          ) : null}
         </div>
         <p className="mt-4 text-center text-[13px] text-muted-foreground">
           No account?{" "}

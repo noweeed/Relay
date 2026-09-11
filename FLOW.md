@@ -158,7 +158,7 @@ Timestamped speaker segments
 Normal transcript meeting flow
 ```
 
-The request returns after the meeting and job are created. Processing continues asynchronously. Failed processing can be retried without uploading the audio again.
+The request returns after the audio is stored and the meeting job is created. Node sends Python a short-lived signed object URL. Python transcribes it into timestamped segments, runs the normal extraction graph, and returns transcript plus candidates for Node to validate and persist atomically. Failed processing can be retried with a fresh signed URL without uploading the audio again. Current Groq Whisper transcription does not claim speaker identity or invent diarization labels.
 
 ## 5. Candidate review flow
 

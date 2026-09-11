@@ -1,6 +1,8 @@
 import { Router, type Request, type Response } from "express";
 import { authRouter } from "./auth.routes";
 import { projectRouter } from "./project.routes";
+import { mediaRouter } from "./media.routes";
+import { notificationRouter } from "./notification.routes";
 
 export const apiRouter = Router();
 
@@ -17,4 +19,6 @@ function getApiInformation(_request: Request, response: Response): void {
 apiRouter.get("/", getApiInformation);
 
 apiRouter.use("/auth", authRouter);
+apiRouter.use("/media", mediaRouter);
+apiRouter.use("/notifications", notificationRouter);
 apiRouter.use("/projects", projectRouter);

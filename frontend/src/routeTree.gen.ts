@@ -15,6 +15,7 @@ import { Route as LoginRouteImport } from './routes/login'
 import { Route as SignupRouteImport } from './routes/signup'
 import { Route as AppIndexRouteImport } from './routes/app.index'
 import { Route as AppAccountRouteImport } from './routes/app.account'
+import { Route as AppActivityRouteImport } from './routes/app.activity'
 import { Route as AppBoardRouteImport } from './routes/app.board'
 import { Route as AppNewProjectRouteImport } from './routes/app.new-project'
 import { Route as AppReviewRouteImport } from './routes/app.review'
@@ -51,6 +52,11 @@ const AppIndexRoute = AppIndexRouteImport.update({
 const AppAccountRoute = AppAccountRouteImport.update({
   id: '/account',
   path: '/account',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppActivityRoute = AppActivityRouteImport.update({
+  id: '/activity',
+  path: '/activity',
   getParentRoute: () => AppRoute,
 } as any)
 const AppBoardRoute = AppBoardRouteImport.update({
@@ -95,6 +101,7 @@ export interface FileRoutesByFullPath {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/app/account': typeof AppAccountRoute
+  '/app/activity': typeof AppActivityRoute
   '/app/board': typeof AppBoardRoute
   '/app/new-project': typeof AppNewProjectRoute
   '/app/review': typeof AppReviewRoute
@@ -109,6 +116,7 @@ export interface FileRoutesByTo {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/app/account': typeof AppAccountRoute
+  '/app/activity': typeof AppActivityRoute
   '/app/board': typeof AppBoardRoute
   '/app/new-project': typeof AppNewProjectRoute
   '/app/review': typeof AppReviewRoute
@@ -125,6 +133,7 @@ export interface FileRoutesById {
   '/login': typeof LoginRoute
   '/signup': typeof SignupRoute
   '/app/account': typeof AppAccountRoute
+  '/app/activity': typeof AppActivityRoute
   '/app/board': typeof AppBoardRoute
   '/app/new-project': typeof AppNewProjectRoute
   '/app/review': typeof AppReviewRoute
@@ -142,6 +151,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/app/account'
+    | '/app/activity'
     | '/app/board'
     | '/app/new-project'
     | '/app/review'
@@ -156,6 +166,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/app/account'
+    | '/app/activity'
     | '/app/board'
     | '/app/new-project'
     | '/app/review'
@@ -171,6 +182,7 @@ export interface FileRouteTypes {
     | '/login'
     | '/signup'
     | '/app/account'
+    | '/app/activity'
     | '/app/board'
     | '/app/new-project'
     | '/app/review'
@@ -232,6 +244,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppAccountRouteImport
       parentRoute: typeof AppRoute
     }
+    '/app/activity': {
+      id: '/app/activity'
+      path: '/activity'
+      fullPath: '/app/activity'
+      preLoaderRoute: typeof AppActivityRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/app/board': {
       id: '/app/board'
       path: '/board'
@@ -286,6 +305,7 @@ declare module '@tanstack/react-router' {
 
 interface AppRouteChildren {
   AppAccountRoute: typeof AppAccountRoute
+  AppActivityRoute: typeof AppActivityRoute
   AppBoardRoute: typeof AppBoardRoute
   AppNewProjectRoute: typeof AppNewProjectRoute
   AppReviewRoute: typeof AppReviewRoute
@@ -298,6 +318,7 @@ interface AppRouteChildren {
 
 const AppRouteChildren: AppRouteChildren = {
   AppAccountRoute: AppAccountRoute,
+  AppActivityRoute: AppActivityRoute,
   AppBoardRoute: AppBoardRoute,
   AppNewProjectRoute: AppNewProjectRoute,
   AppReviewRoute: AppReviewRoute,

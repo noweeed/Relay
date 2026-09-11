@@ -1,4 +1,4 @@
-import { Link, createFileRoute } from "@tanstack/react-router";
+import { Link, createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Mic } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -10,20 +10,13 @@ import {
   EmptyState,
 } from "@/components/relay/primitives";
 import { useRelay } from "@/lib/relay-store";
-import {
-  activityFeed,
-  dueThisWeek,
-  formatDate,
-  isOverdue,
-  memberById,
-  type Task,
-} from "@/lib/relay-data";
+import { dueThisWeek, formatDate, isOverdue, type Task } from "@/lib/relay-data";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/app/")({
   head: () => ({
     meta: [
-      { title: "Overview | Relay" },
+      { title: "Relay" },
       {
         name: "description",
         content:
@@ -64,19 +57,71 @@ function Stat({
   );
 }
 
+function TaskAssignees({ task }: { task: Task }) {
+  const memberIds = task.assigneeIds ?? (task.assigneeId ? [task.assigneeId] : []);
+  const memberNames = task.assigneeNames ?? (task.assigneeName ? [task.assigneeName] : []);
+  const assigneeCount = Math.max(memberIds.length, memberNames.length);
+
+  if (assigneeCount === 0) {
+    return (
+      <span className="inline-flex items-center gap-1.5">
+        <UserAvatar memberId={null} size={20} />
+        Unassigned
+      </span>
+    );
+  }
+
+  return (
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+      {Array.from({ length: assigneeCount }, (_, index) => (
+        <span
+          key={memberIds[index] ?? `${memberNames[index] ?? "assignee"}-${index}`}
+          className="inline-flex items-center gap-1.5 whitespace-nowrap"
+        >
+          <UserAvatar memberId={memberIds[index]} memberName={memberNames[index]} size={20} />
+          {memberNames[index] ?? "Assigned"}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function OverviewPage() {
-  const { tasks, meetings, activeProject, candidates } = useRelay();
+  const {
+    tasks,
+    meetings,
+    activeProject,
+    candidates,
+    members,
+    recentActivity,
+    projectsLoading,
+    projectsError,
+  } = useRelay();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     const t = setTimeout(() => setLoading(false), 450);
     return () => clearTimeout(t);
   }, []);
 
+  useEffect(() => {
+    if (!projectsLoading && !projectsError && !activeProject) {
+      navigate({ to: "/app/new-project", replace: true });
+    }
+  }, [activeProject, navigate, projectsError, projectsLoading]);
+
+  useEffect(() => {
+    const nextUtcDay = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1);
+    const timer = setTimeout(() => setNow(new Date()), Math.max(1, nextUtcDay - Date.now()));
+    return () => clearTimeout(timer);
+  }, [now]);
+
   const open = tasks.filter((t) => t.status === "todo").length;
   const inProgress = tasks.filter((t) => t.status === "in_progress").length;
-  const week = tasks.filter(dueThisWeek).length;
-  const overdue = tasks.filter(isOverdue).length;
+  const week = tasks.filter((task) => dueThisWeek(task, now)).length;
+  const overdue = tasks.filter((task) => isOverdue(task, now)).length;
 
   const upcoming: Task[] = [...tasks]
     .filter((t) => t.status !== "done" && t.due)
@@ -147,16 +192,15 @@ function OverviewPage() {
                         <Link to="/app/board" className="hover:underline">
                           {t.title}
                         </Link>
-                        {isOverdue(t) ? (
+                        {isOverdue(t, now) ? (
                           <span className="ml-2">
                             <Tag tone="danger">Overdue</Tag>
                           </span>
                         ) : null}
                       </td>
                       <td className="px-4 py-2.5">
-                        <span className="flex items-center gap-2 text-[13px] text-muted-foreground">
-                          <UserAvatar memberId={t.assigneeId} size={20} />
-                          {memberById(t.assigneeId)?.name.split(" ")[0] ?? "Unassigned"}
+                        <span className="text-[13px] text-muted-foreground">
+                          <TaskAssignees task={t} />
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-[13px] text-muted-foreground">
@@ -181,7 +225,7 @@ function OverviewPage() {
                 to="/app/meetings"
                 className="text-[13px] text-muted-foreground hover:text-foreground"
               >
-                All meetings
+                View all
               </Link>
             </div>
             <div className="mt-3 divide-y divide-border rounded-xl border border-border bg-card">
@@ -194,7 +238,7 @@ function OverviewPage() {
                   />
                 </div>
               ) : (
-                meetings.slice(0, 4).map((m) => {
+                meetings.slice(0, 5).map((m) => {
                   const count = tasks.filter((t) => t.sourceMeetingId === m.id).length;
                   return (
                     <Link
@@ -231,20 +275,30 @@ function OverviewPage() {
           </section>
 
           <section>
-            <h2 className="section-title">Recent activity</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="section-title">Recent activity</h2>
+              <Link
+                to="/app/activity"
+                className="text-[13px] text-muted-foreground hover:text-foreground"
+              >
+                View all
+              </Link>
+            </div>
             <ul className="mt-3 space-y-3.5">
-              {activityFeed.map((a) => (
+              {recentActivity.slice(0, 5).map((a) => (
                 <li key={a.id} className="flex gap-2.5">
-                  <UserAvatar memberId={a.who} size={22} />
+                  <UserAvatar memberId={a.actorId} memberName={a.actorName} size={22} />
                   <span>
                     <span className="text-[13.5px]">
-                      <span className="font-medium">{memberById(a.who)?.name.split(" ")[0]}</span>{" "}
-                      {a.text}
+                      <span className="font-medium">{a.actorName ?? "Relay"}</span> {a.text}
                     </span>
                     <span className="meta-text block">{a.at}</span>
                   </span>
                 </li>
               ))}
+              {recentActivity.length === 0 ? (
+                <li className="text-[13.5px] text-muted-foreground">No recent activity yet.</li>
+              ) : null}
             </ul>
           </section>
         </div>

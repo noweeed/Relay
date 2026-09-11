@@ -23,6 +23,7 @@ import { apiErrorMessage } from "@/lib/api-client";
 import { priorityLabel, type Priority } from "@/lib/relay-data";
 import { useRelay } from "@/lib/relay-store";
 import { toast } from "sonner";
+import { AssigneeMultiSelect } from "./assignee-multi-select";
 
 export function CreateTaskDialog({
   open,
@@ -37,7 +38,7 @@ export function CreateTaskDialog({
   const columns = useMemo(() => activeProject?.kanbanColumns ?? [], [activeProject?.kanbanColumns]);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [assigneeId, setAssigneeId] = useState<string>("none");
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([]);
   const [due, setDue] = useState("");
   const [priority, setPriority] = useState<Priority>("medium");
   const [columnId, setColumnId] = useState(defaultColumnId ?? "");
@@ -67,7 +68,7 @@ export function CreateTaskDialog({
       await addTask({
         title: title.trim(),
         description,
-        assigneeId: assigneeId === "none" ? null : assigneeId,
+        assigneeIds,
         due: due || null,
         priority,
         columnId,
@@ -75,6 +76,7 @@ export function CreateTaskDialog({
       onOpenChange(false);
       setTitle("");
       setDescription("");
+      setAssigneeIds([]);
       setDue("");
       toast.success("Task added to the board");
     } catch (requestError) {
@@ -117,20 +119,12 @@ export function CreateTaskDialog({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
-              <Label>Assignee</Label>
-              <Select value={assigneeId} onValueChange={setAssigneeId}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Unassigned</SelectItem>
-                  {members.map((m) => (
-                    <SelectItem key={m.id} value={m.id}>
-                      {m.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Label>Assignees</Label>
+              <AssigneeMultiSelect
+                members={members}
+                selectedIds={assigneeIds}
+                onChange={setAssigneeIds}
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="nt-due">Due date</Label>
